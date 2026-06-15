@@ -1,11 +1,11 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, Fragment } from 'react'
 
 function Badge({ label, color }) {
   const colors = {
-    good: 'text-[#00ff88] border-[#00ff88]',
-    moderate: 'text-[#ffcc00] border-[#ffcc00]',
-    poor: 'text-[#ff3355] border-[#ff3355]',
-    none: 'text-[#555] border-[#555]',
+    good: 'text-[var(--safe)] border-[var(--safe)]',
+    moderate: 'text-[var(--warn)] border-[var(--warn)]',
+    poor: 'text-[var(--danger)] border-[var(--danger)]',
+    none: 'text-[var(--tx-muted)] border-[var(--tx-muted)]',
   }
   return (
     <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${colors[color] || colors.none}`}
@@ -18,22 +18,22 @@ function Badge({ label, color }) {
 function Section({ title, children }) {
   return (
     <div className="mb-3">
-      <p className="text-[10px] tracking-[0.12em] text-[#555] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{title}</p>
+      <p className="text-[10px] tracking-[0.12em] text-[var(--tx-muted)] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{title}</p>
       {children}
     </div>
   )
 }
 
 function DetailRow({ label, value, status }) {
-  const sc = status === 'pass' || status === true || status === 'OK' ? 'text-[#00ff88]'
-    : status === 'warning' || status === 'softfail' || status === 'quarantine' || status === 'neutral' ? 'text-[#ffcc00]'
-    : status === 'missing' || status === false || status === 'none' || status === 'poor' ? 'text-[#ff3355]'
-    : 'text-[#555]'
+  const sc = status === 'pass' || status === true || status === 'OK' ? 'text-[var(--safe)]'
+    : status === 'warning' || status === 'softfail' || status === 'quarantine' || status === 'neutral' ? 'text-[var(--warn)]'
+    : status === 'missing' || status === false || status === 'none' || status === 'poor' ? 'text-[var(--danger)]'
+    : 'text-[var(--tx-muted)]'
   const sl = status === true ? 'OK' : status === false ? 'MISSING' : typeof status === 'string' ? status.toUpperCase() : ''
   return (
-    <div className="flex items-start gap-3 py-1 border-b border-[#1a1a1a]/20">
-      <span className="text-[#a0a0a0] text-[10px] w-16 shrink-0">{label}</span>
-      <span className="text-[#555] text-[10px] font-mono break-all flex-1">{value || <span className="italic">—</span>}</span>
+    <div className="flex items-start gap-3 py-1 border-b border-[var(--border)]/20">
+      <span className="text-[var(--tx-secondary)] text-[10px] w-16 shrink-0">{label}</span>
+      <span className="text-[var(--tx-muted)] text-[10px] font-mono break-all flex-1">{value || <span className="italic">—</span>}</span>
       {sl && <span className={`text-[10px] tracking-wider shrink-0 ${sc}`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{sl}</span>}
     </div>
   )
@@ -41,7 +41,7 @@ function DetailRow({ label, value, status }) {
 
 function ExpandedDetail({ r }) {
   if (!r.domain) return (
-    <div className="px-4 py-3 text-[10px] text-[#ff3355]">no domain found for this company</div>
+    <div className="px-4 py-3 text-[10px] text-[var(--danger)]">no domain found for this company</div>
   )
 
   return (
@@ -73,8 +73,8 @@ function ExpandedDetail({ r }) {
         </Section>
         <Section title="RECOMMENDATION">
           <p className={`text-[10px] tracking-wider ${
-            r.deliverability?.level === 'good' ? 'text-[#00ff88]' :
-            r.deliverability?.level === 'moderate' ? 'text-[#ffcc00]' : 'text-[#ff3355]'
+            r.deliverability?.level === 'good' ? 'text-[var(--safe)]' :
+            r.deliverability?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'
           }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
             {r.deliverability?.level === 'good' ? 'EMAIL SAFE — send cold campaigns' :
              r.deliverability?.level === 'moderate' ? 'TEST FIRST — low volume, monitor bounces' :
@@ -145,12 +145,6 @@ export default function BulkScanner() {
     }
   }
 
-  const singleLookup = async () => {
-    const d = input.trim()
-    if (!d) return
-    setInput(`acme corp\nstripe\nstripe.com`)
-  }
-
   const addToWatchlist = async (domain, name) => {
     await fetch('/api/watchlist', {
       method: 'POST',
@@ -184,31 +178,30 @@ export default function BulkScanner() {
 
   return (
     <div>
-      <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[#555] tracking-wider">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[var(--tx-muted)] tracking-wider">
         <span>⚡ COMPANY NAMES → DOMAINS → MX + SPF/DKIM/DMARC + BLACKLIST + SCORE</span>
         <span>⊘ MAX 100/REQ</span>
         <span>⏱ 30 SCANS/15M</span>
       </div>
 
-      {/* Input area */}
       <div
         onDrop={handleDrop}
         onDragOver={e => e.preventDefault()}
-        className="chrome-border p-6 mb-4 text-center cursor-pointer transition-colors hover:border-[#2a2a2a]"
-        style={{ background: 'var(--chromium-surface)' }}
+        className="chrome-border p-4 md:p-6 mb-4 text-center cursor-pointer transition-colors hover:border-[var(--border-active)]"
+        style={{ background: 'var(--surface)' }}
         onClick={() => fileInputRef.current?.click()}
       >
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileSelect} className="hidden" />
-        <p className="text-[#a0a0a0] text-sm mb-2 tracking-wider" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>ENTER COMPANY NAMES OR DOMAINS</p>
-        <p className="text-[10px] text-[#555] tracking-wider">one per line · auto-detects domains vs company names · or drop CSV</p>
+        <p className="text-[var(--tx-secondary)] text-xs md:text-sm mb-2 tracking-wider" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>ENTER COMPANY NAMES OR DOMAINS</p>
+        <p className="text-[10px] text-[var(--tx-muted)] tracking-wider">one per line · auto-detects domains vs company names · or drop CSV</p>
       </div>
 
       <textarea
         value={input}
         onChange={e => setInput(e.target.value)}
         placeholder={`acme corp\nstripe\nstripe.com → auto-detected as domain`}
-        className="w-full h-28 chrome-surface text-xs text-[#a0a0a0] p-3 mb-4 resize-none outline-none"
-        style={{ background: 'var(--chromium-surface)', border: '1px solid var(--chromium-border)' }}
+        className="w-full h-24 md:h-28 chrome-surface text-xs text-[var(--tx-secondary)] p-3 mb-4 resize-none outline-none"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
       />
 
       <div className="flex items-center gap-3 mb-6">
@@ -217,98 +210,95 @@ export default function BulkScanner() {
           <button onClick={exportCSV} className="chrome-button px-4 py-2 text-xs">⬇ EXPORT CSV</button>
         )}
         {loading && (
-          <div className="flex items-center gap-2 text-xs text-[#555]">
-            <div className="w-3 h-3 border border-[#00f0ff] animate-spin" style={{ boxShadow: '0 0 6px rgba(0,240,255,0.1)' }} />
+          <div className="flex items-center gap-2 text-xs text-[var(--tx-muted)]">
+            <div className="w-3 h-3 border border-[var(--accent)] animate-spin" style={{ boxShadow: '0 0 6px var(--accent-shadow)' }} />
             {status}
           </div>
         )}
-        {!loading && status && <span className="text-xs text-[#555] tracking-wider">{status}</span>}
-        {error && <span className="text-xs text-[#ff3355]">{error}</span>}
+        {!loading && status && <span className="text-xs text-[var(--tx-muted)] tracking-wider">{status}</span>}
+        {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
       </div>
 
-      {/* Summary Cards */}
       {results.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-px mb-6" style={{ background: 'var(--chromium-border)' }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-px mb-6" style={{ background: 'var(--border)' }}>
           {[
-            { label: 'TOTAL', value: results.length, color: 'text-[#d4d4d4]', key: 'total' },
-            { label: 'DOMAINS FOUND', value: results.filter(r => r.domain).length, color: 'text-[#00ff88]', key: 'found' },
-            { label: 'EMAIL SAFE', value: results.filter(r => r.deliverability?.level === 'good').length, color: 'text-[#00ff88]', key: 'good' },
-            { label: 'AVOID EMAIL', value: results.filter(r => r.deliverability?.level === 'poor').length, color: 'text-[#ff3355]', key: 'poor' },
+            { label: 'TOTAL', value: results.length, color: 'text-[var(--tx-primary)]', key: 'total' },
+            { label: 'DOMAINS FOUND', value: results.filter(r => r.domain).length, color: 'text-[var(--safe)]', key: 'found' },
+            { label: 'EMAIL SAFE', value: results.filter(r => r.deliverability?.level === 'good').length, color: 'text-[var(--safe)]', key: 'good' },
+            { label: 'AVOID EMAIL', value: results.filter(r => r.deliverability?.level === 'poor').length, color: 'text-[var(--danger)]', key: 'poor' },
           ].map(s => (
-            <div key={s.key} className="p-4" style={{ background: 'var(--chromium-surface)' }}>
-              <p className="text-[10px] tracking-[0.12em] text-[#555] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{s.label}</p>
+            <div key={s.key} className="p-4" style={{ background: 'var(--surface)' }}>
+              <p className="text-[10px] tracking-[0.12em] text-[var(--tx-muted)] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{s.label}</p>
               <p className={`text-2xl ${s.color}`} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.04em' }}>{s.value}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Results */}
       {sortedResults.length > 0 && (
         <div className="chrome-surface overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-[#1a1a1a] text-[#555] text-[10px] uppercase tracking-wider">
+                <tr className="border-b border-[var(--border)] text-[var(--tx-muted)] text-[10px] uppercase tracking-wider">
                   <th className="text-left px-4 py-3 font-medium">SCORE</th>
                   <th className="text-left px-4 py-3 font-medium">COMPANY</th>
-                  <th className="text-left px-4 py-3 font-medium">DOMAIN</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">DOMAIN</th>
                   <th className="text-left px-4 py-3 font-medium">FIREWALL</th>
-                  <th className="text-left px-4 py-3 font-medium">SPF</th>
-                  <th className="text-left px-4 py-3 font-medium">DKIM</th>
-                  <th className="text-left px-4 py-3 font-medium">DMARC</th>
-                  <th className="text-left px-4 py-3 font-medium">BL</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">SPF</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">DKIM</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">DMARC</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">BL</th>
                   <th className="text-left px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
                 {sortedResults.map((r, i) => (
-                  <>
+                  <Fragment key={i}>
                     <tr
-                      key={i}
                       onClick={() => setExpandedRow(expandedRow === i ? null : i)}
-                      className="border-b border-[#1a1a1a]/50 cursor-pointer transition-colors hover:bg-white/[0.02]"
+                      className="border-b border-[var(--border)]/50 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
                       style={r.deliverability?.level === 'poor' ? { background: 'rgba(255,51,85,0.03)' } : r.deliverability?.level === 'moderate' ? { background: 'rgba(255,204,0,0.03)' } : {}}
                     >
                       <td className="px-4 py-3">
                         {r.deliverability ? (
                           <Badge label={`${r.deliverability.score}`} color={r.deliverability.level} />
-                        ) : <span className="text-[#555]">—</span>}
+                        ) : <span className="text-[var(--tx-muted)]">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-[#d4d4d4] max-w-[160px] truncate">{r.name}</td>
-                      <td className="px-4 py-3 text-[#a0a0a0]">{r.domain || <span className="text-[#555]">—</span>}</td>
+                      <td className="px-4 py-3 text-[var(--tx-primary)] max-w-[120px] md:max-w-[160px] truncate">{r.name}</td>
+                      <td className="px-4 py-3 text-[var(--tx-secondary)] hide-mobile">{r.domain || <span className="text-[var(--tx-muted)]">—</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-0.5">
                           <span className={`text-[10px] tracking-wider ${
-                            r.mxRisk === 'high' ? 'text-[#ff3355]' : r.mxRisk === 'medium' ? 'text-[#ffcc00]' : r.mxRisk === 'low' ? 'text-[#00ff88]' : 'text-[#555]'
+                            r.mxRisk === 'high' ? 'text-[var(--danger)]' : r.mxRisk === 'medium' ? 'text-[var(--warn)]' : r.mxRisk === 'low' ? 'text-[var(--safe)]' : 'text-[var(--tx-muted)]'
                           }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                             {r.mxRisk || '—'}
                           </span>
-                          <span className="text-[9px] text-[#555] max-w-[120px] truncate" title={(r.mxDetail?.providers || []).join(', ')}>
+                          <span className="text-[9px] text-[var(--tx-muted)] max-w-[100px] md:max-w-[120px] truncate" title={(r.mxDetail?.providers || []).join(', ')}>
                             {(r.mxDetail?.providers || []).join(', ') || ''}
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] ${r.dnsAuth?.spf?.status === 'pass' ? 'text-[#00ff88]' : r.dnsAuth?.spf?.status === 'missing' ? 'text-[#ff3355]' : 'text-[#ffcc00]'}`}
+                      <td className="px-4 py-3 hide-mobile">
+                        <span className={`text-[10px] ${r.dnsAuth?.spf?.status === 'pass' ? 'text-[var(--safe)]' : r.dnsAuth?.spf?.status === 'missing' ? 'text-[var(--danger)]' : 'text-[var(--warn)]'}`}
                           style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                           {r.dnsAuth?.spf?.status || '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] ${r.dnsAuth?.dkim?.found ? 'text-[#00ff88]' : 'text-[#ff3355]'}`}
+                      <td className="px-4 py-3 hide-mobile">
+                        <span className={`text-[10px] ${r.dnsAuth?.dkim?.found ? 'text-[var(--safe)]' : 'text-[var(--danger)]'}`}
                           style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                           {r.dnsAuth?.dkim?.found ? 'OK' : '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] ${r.dnsAuth?.dmarc?.policy === 'reject' ? 'text-[#00ff88]' : r.dnsAuth?.dmarc?.policy === 'none' || !r.dnsAuth?.dmarc ? 'text-[#ff3355]' : 'text-[#ffcc00]'}`}
+                      <td className="px-4 py-3 hide-mobile">
+                        <span className={`text-[10px] ${r.dnsAuth?.dmarc?.policy === 'reject' ? 'text-[var(--safe)]' : r.dnsAuth?.dmarc?.policy === 'none' || !r.dnsAuth?.dmarc ? 'text-[var(--danger)]' : 'text-[var(--warn)]'}`}
                           style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                           {r.dnsAuth?.dmarc?.policy || '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] ${r.blacklist?.listed ? 'text-[#ff3355]' : 'text-[#555]'}`}
+                      <td className="px-4 py-3 hide-mobile">
+                        <span className={`text-[10px] ${r.blacklist?.listed ? 'text-[var(--danger)]' : 'text-[var(--tx-muted)]'}`}
                           style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                           {r.blacklist?.listed ? 'YES' : '—'}
                         </span>
@@ -317,7 +307,7 @@ export default function BulkScanner() {
                         {r.domain && (
                           <button
                             onClick={e => { e.stopPropagation(); addToWatchlist(r.domain, r.name); }}
-                            className="text-[10px] text-[#555] hover:text-[#00f0ff] transition-colors"
+                            className="text-[10px] text-[var(--tx-muted)] hover:text-[var(--accent)] transition-colors"
                             style={{ fontFamily: "'Bebas Neue', sans-serif" }}
                             title="add to watchlist"
                           >
@@ -333,21 +323,21 @@ export default function BulkScanner() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="text-[10px] text-[#333] px-4 py-2 border-t border-[#1a1a1a] tracking-wider">
+          <div className="text-[10px] text-[var(--tx-dim)] px-4 py-2 border-t border-[var(--border)] tracking-wider">
             click any row for full MX records, SPF/DKIM/DMARC text, blacklist IPs & recommendation
           </div>
         </div>
       )}
 
       {results.length === 0 && !loading && (
-        <div className="chrome-surface text-center py-16">
-          <p className="text-[#555] text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>TARGET SCANNER</p>
-          <p className="text-[#333] text-xs">one place for every signal: MX firewall + SPF/DKIM/DMARC + blacklist + deliverability score</p>
+        <div className="chrome-surface text-center py-12 md:py-16">
+          <p className="text-[var(--tx-muted)] text-base md:text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>TARGET SCANNER</p>
+          <p className="text-[var(--tx-dim)] text-xs">one place for every signal: MX firewall + SPF/DKIM/DMARC + blacklist + deliverability score</p>
         </div>
       )}
     </div>
