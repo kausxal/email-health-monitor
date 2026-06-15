@@ -253,7 +253,7 @@ export default function BulkScanner() {
                   <th className="text-left px-4 py-3 font-medium">SCORE</th>
                   <th className="text-left px-4 py-3 font-medium">COMPANY</th>
                   <th className="text-left px-4 py-3 font-medium">DOMAIN</th>
-                  <th className="text-left px-4 py-3 font-medium">MX</th>
+                  <th className="text-left px-4 py-3 font-medium">FIREWALL</th>
                   <th className="text-left px-4 py-3 font-medium">SPF</th>
                   <th className="text-left px-4 py-3 font-medium">DKIM</th>
                   <th className="text-left px-4 py-3 font-medium">DMARC</th>
@@ -278,11 +278,16 @@ export default function BulkScanner() {
                       <td className="px-4 py-3 text-[#d4d4d4] max-w-[160px] truncate">{r.name}</td>
                       <td className="px-4 py-3 text-[#a0a0a0]">{r.domain || <span className="text-[#555]">—</span>}</td>
                       <td className="px-4 py-3">
-                        <span className={`text-[10px] tracking-wider ${
-                          r.mxRisk === 'high' ? 'text-[#ff3355]' : r.mxRisk === 'medium' ? 'text-[#ffcc00]' : r.mxRisk === 'low' ? 'text-[#00ff88]' : 'text-[#555]'
-                        }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {r.mxRisk || '—'}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`text-[10px] tracking-wider ${
+                            r.mxRisk === 'high' ? 'text-[#ff3355]' : r.mxRisk === 'medium' ? 'text-[#ffcc00]' : r.mxRisk === 'low' ? 'text-[#00ff88]' : 'text-[#555]'
+                          }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                            {r.mxRisk || '—'}
+                          </span>
+                          <span className="text-[9px] text-[#555] max-w-[120px] truncate" title={(r.mxDetail?.providers || []).join(', ')}>
+                            {(r.mxDetail?.providers || []).join(', ') || ''}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`text-[10px] ${r.dnsAuth?.spf?.status === 'pass' ? 'text-[#00ff88]' : r.dnsAuth?.spf?.status === 'missing' ? 'text-[#ff3355]' : 'text-[#ffcc00]'}`}
