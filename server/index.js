@@ -423,6 +423,103 @@ app.post('/api/dns/lookup', async (req, res) => {
   res.json({ results: dnsResults });
 });
 
+// ─── Sender Diagnostics ───
+
+const FIX_GUIDES = {
+  spf_missing: { severity: 'high', label: 'SPF record missing', fix: 'Add a TXT record for your domain: v=spf1 include:_spf.yourprovider.com ~all' },
+  spf_weak: { severity: 'medium', label: 'SPF uses ~all (softfail)', fix: 'Switch ~all to -all once you have identified all sending sources' },
+  spf_pass: { severity: 'good', label: 'SPF configured correctly', fix: null },
+  dkim_missing: { severity: 'high', label: 'DKIM not found', fix: 'Generate a DKIM key in your email provider and add a TXT record for [selector]._domainkey.yourdomain.com' },
+  dkim_ok: { severity: 'good', label: 'DKIM configured', fix: null },
+  dmarc_missing: { severity: 'medium', label: 'DMARC record missing', fix: 'Add a TXT record for _dmarc.yourdomain.com: v=DMARC1; p=none; rua=mailto:reports@yourdomain.com — then gradually move to p=quarantine then p=reject' },
+  dmarc_none: { severity: 'low', label: 'DMARC policy: none (monitoring only)', fix: 'Set p=quarantine after monitoring for a few weeks, then p=reject' },
+  dmarc_pass: { severity: 'good', label: 'DMARC policy: reject or quarantine', fix: null },
+  mx_missing: { severity: 'high', label: 'No MX records (cannot receive email)', fix: 'Add MX records pointing to your email provider. Without MX, your domain cannot receive replies.' },
+  mx_ok: { severity: 'good', label: 'MX records configured', fix: null },
+  blacklisted: { severity: 'high', label: 'Domain IPs appear on DNS blacklists', fix: 'Check Spamhaus, Barracuda, etc. Request delisting. Common causes: compromised server, spam traps, high bounce rates.' },
+  clean: { severity: 'good', label: 'Not on any DNS blacklist', fix: null },
+};
+
+app.post('/api/sender/check', async (req, res) => {
+  const { domain } = req.body;
+  if (!domain) return res.status(400).json({ error: 'Domain is required' });
+
+  const issues = [];
+
+  // MX
+  let mxRecords = [];
+  try {
+    mxRecords = await resolveMxViaDoh(domain);
+  } catch {}
+  if (mxRecords.length === 0) {
+    issues.push({ check: 'mx', status: 'mx_missing', ...FIX_GUIDES.mx_missing });
+  } else {
+    issues.push({ check: 'mx', status: 'mx_ok', detail: `${mxRecords.length} MX records found`, ...FIX_GUIDES.mx_ok });
+  }
+
+  // SPF
+  const spfTxt = await resolveTxtViaDoh(domain);
+  const spf = spfTxt.find(r => r.startsWith('v=spf1')) || null;
+  if (!spf) {
+    issues.push({ check: 'spf', status: 'spf_missing', ...FIX_GUIDES.spf_missing });
+  } else if (spf.includes('-all')) {
+    issues.push({ check: 'spf', status: 'spf_pass', detail: spf, ...FIX_GUIDES.spf_pass });
+  } else if (spf.includes('~all')) {
+    issues.push({ check: 'spf', status: 'spf_weak', detail: spf, ...FIX_GUIDES.spf_weak });
+  } else {
+    issues.push({ check: 'spf', status: 'spf_weak', detail: spf + ' (no -all or ~all)', ...FIX_GUIDES.spf_weak });
+  }
+
+  // DKIM
+  let dkimFound = false;
+  let dkimSelector = null;
+  for (const selector of ['default', 'google', 'selector1', 'selector2', 'dkim', 'mail', 'smtp', 'zoho', 'mx', 'protonmail', 'outlook']) {
+    const records = await resolveTxtViaDoh(`${selector}._domainkey.${domain}`);
+    if (records.find(r => r.startsWith('v=DKIM1'))) { dkimFound = true; dkimSelector = selector; break; }
+  }
+  if (!dkimFound) {
+    issues.push({ check: 'dkim', status: 'dkim_missing', ...FIX_GUIDES.dkim_missing });
+  } else {
+    issues.push({ check: 'dkim', status: 'dkim_ok', detail: `Selector: ${dkimSelector}`, ...FIX_GUIDES.dkim_ok });
+  }
+
+  // DMARC
+  const dmarcTxt = await resolveTxtViaDoh(`_dmarc.${domain}`);
+  const dmarc = dmarcTxt.find(r => r.startsWith('v=DMARC1')) || null;
+  if (!dmarc) {
+    issues.push({ check: 'dmarc', status: 'dmarc_missing', ...FIX_GUIDES.dmarc_missing });
+  } else {
+    const policy = (dmarc.match(/p=(none|quarantine|reject)/) || [])[1] || 'none';
+    if (policy === 'reject' || policy === 'quarantine') {
+      issues.push({ check: 'dmarc', status: 'dmarc_pass', detail: dmarc, ...FIX_GUIDES.dmarc_pass });
+    } else {
+      issues.push({ check: 'dmarc', status: 'dmarc_none', detail: dmarc, ...FIX_GUIDES.dmarc_none });
+    }
+  }
+
+  // Blacklist
+  const bl = await getBlacklistStatus(domain);
+  if (bl.listed) {
+    issues.push({ check: 'blacklist', status: 'blacklisted', detail: bl.checks.map(c => `${c.ip} → ${c.blacklist}`).join(', '), ...FIX_GUIDES.blacklisted });
+  } else {
+    issues.push({ check: 'blacklist', status: 'clean', ...FIX_GUIDES.clean });
+  }
+
+  // Overall score (0-100)
+  const severityScores = { high: -25, medium: -10, low: -5, good: 0 };
+  let score = 100;
+  for (const issue of issues) {
+    score += severityScores[issue.severity] || 0;
+  }
+  score = Math.max(0, Math.min(100, score));
+
+  const critical = issues.filter(i => i.severity === 'high').length;
+  const warnings = issues.filter(i => i.severity === 'medium').length;
+  const level = critical > 0 ? 'poor' : warnings > 0 ? 'moderate' : 'good';
+
+  res.json({ domain, score, level, critical, warnings, issues });
+});
+
 // ─── Blacklist (DNSBL) Checker ───
 
 const DNSBLS = [
@@ -457,31 +554,38 @@ async function lookupDomainIps(domain) {
   return data.Answer.filter(a => a.type === 1).map(a => a.data);
 }
 
+async function getBlacklistStatus(domain) {
+  try {
+    const ips = await lookupDomainIps(domain);
+    const checks = [];
+    for (const ip of ips.slice(0, 2)) {
+      for (const bl of DNSBLS) {
+        if (await checkIpInDnsbl(ip, bl.host)) checks.push({ ip, blacklist: bl.name });
+      }
+    }
+    return { listed: checks.length > 0, checks };
+  } catch {
+    return { listed: false, checks: [] };
+  }
+}
+
 app.post('/api/blacklist/check', async (req, res) => {
   const { domains } = req.body;
   if (!domains || !Array.isArray(domains) || domains.length === 0)
     return res.status(400).json({ error: 'Must provide an array of domains' });
   if (domains.length > 20) return res.status(400).json({ error: 'Max 20 domains per request' });
 
-  const results = [];
-  for (const item of domains) {
+  const results = await Promise.allSettled(domains.map(async item => {
     const domain = typeof item === 'string' ? item : item.domain;
     try {
+      const bl = await getBlacklistStatus(domain);
       const ips = await lookupDomainIps(domain);
-      const checks = [];
-      for (const ip of ips.slice(0, 3)) {
-        for (const bl of DNSBLS) {
-          const listed = await checkIpInDnsbl(ip, bl.host);
-          if (listed) checks.push({ ip, blacklist: bl.name, host: bl.host });
-        }
-      }
-      const listed = checks.length > 0;
-      results.push({ domain, ips, listed, checks, score: listed ? -20 : 0 });
+      return { domain, ips, listed: bl.listed, checks: bl.checks, score: bl.listed ? -20 : 0 };
     } catch (e) {
-      results.push({ domain, ips: [], listed: false, checks: [], score: 0, error: e.message });
+      return { domain, ips: [], listed: false, checks: [], score: 0, error: e.message };
     }
-  }
-  res.json({ results });
+  }));
+  res.json({ results: results.map(r => r.status === 'fulfilled' ? r.value : { domain: 'error', error: r.reason?.message }) });
 });
 
 // ─── Bulk Scanner (unified pipeline) ───
@@ -530,62 +634,62 @@ const bulkLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
 });
 
+async function processOneItem(item) {
+  const name = typeof item === 'string' ? item : item.name || item.company || item.domain || item.website || '';
+  const inputDomain = typeof item === 'string' ? null : item.domain || item.website || null;
+  if (!name.trim()) return null;
+
+  let domain = inputDomain;
+
+  if (!domain) {
+    try {
+      const scRes = await fetch(`${SCRAPER_URL}/scrape/company`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: name.trim() }),
+      });
+      if (scRes.ok) {
+        const scData = await scRes.json();
+        domain = scData.domain || null;
+      }
+    } catch {}
+  }
+
+  const entry = { name, domain: domain || '', mxRisk: null, dnsAuth: null, blacklist: null, deliverability: null };
+
+  if (domain) {
+    const [mxRes, dnsRes, blRes] = await Promise.allSettled([
+      lookupDomains([{ domain, company: name }]),
+      checkDnsAuth(domain),
+      getBlacklistStatus(domain),
+    ]);
+
+    if (mxRes.status === 'fulfilled') {
+      entry.mxRisk = mxRes.value.results?.[0]?.risk || null;
+      entry.mxDetail = mxRes.value.results?.[0] || null;
+    }
+    if (dnsRes.status === 'fulfilled') entry.dnsAuth = dnsRes.value;
+    if (blRes.status === 'fulfilled') entry.blacklist = blRes.value;
+
+    entry.deliverability = computeDeliverability(entry.mxDetail, entry.dnsAuth, entry.blacklist);
+  }
+
+  return entry;
+}
+
 app.post('/api/bulk/scan', bulkLimiter, async (req, res) => {
   const { items } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: 'Must provide an array of items' });
   if (items.length > 100) return res.status(400).json({ error: 'Max 100 items per scan' });
 
+  const CONCURRENCY = 5;
   const results = [];
-  for (const item of items) {
-    const name = typeof item === 'string' ? item : item.name || item.company || item.domain || item.website || '';
-    const inputDomain = typeof item === 'string' ? null : item.domain || item.website || null;
-    if (!name.trim()) continue;
-
-    let domain = inputDomain;
-
-    if (!domain) {
-      try {
-        const scRes = await fetch(`${SCRAPER_URL}/scrape/company`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: name.trim() }),
-        });
-        if (scRes.ok) {
-          const scData = await scRes.json();
-          domain = scData.domain || null;
-        }
-      } catch {}
+  for (let i = 0; i < items.length; i += CONCURRENCY) {
+    const batch = items.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(batch.map(item => processOneItem(item)));
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled' && r.value) results.push(r.value);
     }
-
-    const entry = { name, domain: domain || '', mxRisk: null, dnsAuth: null, blacklist: null, deliverability: null };
-
-    if (domain) {
-      try {
-        const mxRes = await lookupDomains([{ domain, company: name }]);
-        entry.mxRisk = mxRes.results?.[0]?.risk || null;
-        entry.mxDetail = mxRes.results?.[0] || null;
-      } catch {}
-
-      try {
-        const dnsRes = await checkDnsAuth(domain);
-        entry.dnsAuth = dnsRes;
-      } catch {}
-
-      try {
-        const ips = await lookupDomainIps(domain);
-        const checks = [];
-        for (const ip of ips.slice(0, 2)) {
-          for (const bl of DNSBLS) {
-            if (await checkIpInDnsbl(ip, bl.host)) checks.push({ ip, blacklist: bl.name });
-          }
-        }
-        entry.blacklist = { listed: checks.length > 0, checks };
-      } catch {}
-
-      entry.deliverability = computeDeliverability(entry.mxDetail, entry.dnsAuth, entry.blacklist);
-    }
-
-    results.push(entry);
   }
 
   res.json({ results, total: results.length });

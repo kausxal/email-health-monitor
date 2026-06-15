@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 
+function computeDiff(oldR, newR) {
+  const changes = []
+  if (!oldR || !newR) return changes
+  if (oldR.mxRisk !== newR.mxRisk) changes.push(`MX: ${oldR.mxRisk || '?'} → ${newR.mxRisk || '?'}`)
+  if ((oldR.mxDetail?.providers || []).join() !== (newR.mxDetail?.providers || []).join())
+    changes.push(`Provider: ${(oldR.mxDetail?.providers || []).join(',') || 'none'} → ${(newR.mxDetail?.providers || []).join(',') || 'none'}`)
+  if (oldR.dnsAuth?.spf?.status !== newR.dnsAuth?.spf?.status) changes.push(`SPF: ${oldR.dnsAuth?.spf?.status || '?'} → ${newR.dnsAuth?.spf?.status || '?'}`)
+  if (oldR.dnsAuth?.dkim?.found !== newR.dnsAuth?.dkim?.found) changes.push(`DKIM: ${oldR.dnsAuth?.dkim?.found ? 'OK' : 'NO'} → ${newR.dnsAuth?.dkim?.found ? 'OK' : 'NO'}`)
+  if (oldR.dnsAuth?.dmarc?.policy !== newR.dnsAuth?.dmarc?.policy) changes.push(`DMARC: ${oldR.dnsAuth?.dmarc?.policy || '?'} → ${newR.dnsAuth?.dmarc?.policy || '?'}`)
+  if (oldR.blacklist?.listed !== newR.blacklist?.listed) changes.push(`Blacklist: ${oldR.blacklist?.listed ? 'LISTED' : 'CLEAN'} → ${newR.blacklist?.listed ? 'LISTED' : 'CLEAN'}`)
+  return changes
+}
+
 export default function Watchlist() {
   const [watchlist, setWatchlist] = useState([])
   const [checking, setChecking] = useState({})
@@ -31,7 +44,12 @@ export default function Watchlist() {
       const data = await res.json()
       const result = data.results?.[0]
       if (result) {
-        setWatchlist(w => w.map(x => x.domain === domain ? { ...x, lastResult: result, lastChecked: Date.now() } : x))
+        setWatchlist(w => w.map(x => {
+          if (x.domain !== domain) return x
+          const old = x.lastResult
+          const changes = old ? computeDiff(old, result) : []
+          return { ...x, lastResult: result, lastChecked: Date.now(), lastDiff: changes, diffSeen: false }
+        }))
       }
     } catch {}
     setChecking(c => ({ ...c, [domain]: null }))
@@ -62,7 +80,7 @@ export default function Watchlist() {
       {watchlist.length === 0 ? (
         <div className="chrome-surface text-center py-12 md:py-16">
           <p className="text-[var(--tx-muted)] text-base md:text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>WATCHLIST</p>
-          <p className="text-[var(--tx-dim)] text-xs">add domains from Target Scanner &mdash; recheck anytime for MX provider changes or auth degradations</p>
+          <p className="text-[var(--tx-dim)] text-xs">add domains from Target Scanner — recheck shows what changed since last scan</p>
         </div>
       ) : (
         <div className="chrome-surface overflow-hidden">
@@ -72,12 +90,9 @@ export default function Watchlist() {
                 <tr className="border-b border-[var(--border)] text-[var(--tx-muted)] text-[10px] uppercase tracking-wider">
                   <th className="text-left px-4 py-3 font-medium">DOMAIN</th>
                   <th className="text-left px-4 py-3 font-medium">SCORE</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">CHANNEL</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">MX</th>
-                  <th className="text-left px-4 py-3 font-medium hide-mobile">SPF</th>
-                  <th className="text-left px-4 py-3 font-medium hide-mobile">DKIM</th>
-                  <th className="text-left px-4 py-3 font-medium hide-mobile">DMARC</th>
-                  <th className="text-left px-4 py-3 font-medium hide-mobile">BL</th>
-                  <th className="text-left px-4 py-3 font-medium hide-mobile">CHECKED</th>
+                  <th className="text-left px-4 py-3 font-medium hide-mobile">CHANGES</th>
                   <th className="text-left px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
@@ -85,58 +100,50 @@ export default function Watchlist() {
                 {watchlist.map((item, i) => {
                   const lr = item.lastResult
                   const del = lr?.deliverability
+                  const hasDiff = item.lastDiff?.length > 0
                   return (
-                    <tr key={i} className="border-b border-[var(--border)]/50 transition-colors hover:bg-[var(--bg-hover)]">
-                      <td className="px-4 py-3 font-medium text-[var(--tx-primary)]">{item.domain}</td>
+                    <tr key={i} className={`border-b border-[var(--border)]/50 transition-colors hover:bg-[var(--bg-hover)] ${hasDiff ? 'bg-[var(--warn)]/5' : ''}`}>
+                      <td className="px-4 py-3 font-medium text-[var(--tx-primary)] flex items-center gap-2">
+                        {item.domain}
+                        {hasDiff && <span className="text-[var(--warn)] text-[9px]" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>CHANGED</span>}
+                      </td>
                       <td className="px-4 py-3">
                         {del ? (
-                          <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${
-                            del.level === 'good' ? 'text-[var(--safe)] border-[var(--safe)]' :
-                            del.level === 'moderate' ? 'text-[var(--warn)] border-[var(--warn)]' :
-                            'text-[var(--danger)] border-[var(--danger)]'
-                          }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                            {del.score}
-                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${del.level === 'good' ? 'text-[var(--safe)] border-[var(--safe)]' : del.level === 'moderate' ? 'text-[var(--warn)] border-[var(--warn)]' : 'text-[var(--danger)] border-[var(--danger)]'}`}
+                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{del.score}%</span>
                         ) : <span className="text-[var(--tx-muted)]">—</span>}
                       </td>
                       <td className="px-4 py-3 hide-mobile">
-                        <span className={`text-[10px] tracking-wider ${
-                          lr?.mxRisk === 'high' ? 'text-[var(--danger)]' :
-                          lr?.mxRisk === 'medium' ? 'text-[var(--warn)]' :
-                          lr?.mxRisk === 'low' ? 'text-[var(--safe)]' : 'text-[var(--tx-muted)]'
-                        }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {lr?.mxRisk || '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-[var(--tx-muted)] hide-mobile">{lr?.dnsAuth?.spf?.status || '—'}</td>
-                      <td className="px-4 py-3 text-[var(--tx-muted)] hide-mobile">{lr?.dnsAuth?.dkim?.found ? 'OK' : '—'}</td>
-                      <td className="px-4 py-3 text-[var(--tx-muted)] hide-mobile">{lr?.dnsAuth?.dmarc?.policy || '—'}</td>
-                      <td className="px-4 py-3 hide-mobile">
-                        <span className={`text-[10px] ${lr?.blacklist?.listed ? 'text-[var(--danger)]' : 'text-[var(--tx-muted)]'}`}
+                        <span className={`text-[10px] ${del?.level === 'good' ? 'text-[var(--safe)]' : del?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'}`}
                           style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {lr?.blacklist?.listed ? 'YES' : '—'}
+                          {del?.level === 'good' ? 'EMAIL' : del?.level === 'moderate' ? 'TEST' : del?.level === 'poor' ? 'LINKEDIN' : '—'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-[var(--tx-dim)] text-[10px] hide-mobile">
-                        {item.lastChecked ? new Date(item.lastChecked).toLocaleTimeString() : 'never'}
+                      <td className="px-4 py-3 hide-mobile">
+                        <span className={`text-[10px] tracking-wider ${lr?.mxRisk === 'high' ? 'text-[var(--danger)]' : lr?.mxRisk === 'medium' ? 'text-[var(--warn)]' : lr?.mxRisk === 'low' ? 'text-[var(--safe)]' : 'text-[var(--tx-muted)]'}`}
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{lr?.mxRisk || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 hide-mobile">
+                        {hasDiff ? (
+                          <div className="space-y-0.5">
+                            {item.lastDiff.map((d, di) => (
+                              <p key={di} className="text-[9px] text-[var(--warn)] leading-tight">{d}</p>
+                            ))}
+                          </div>
+                        ) : item.lastChecked ? (
+                          <span className="text-[var(--tx-dim)] text-[9px]">no changes</span>
+                        ) : <span className="text-[var(--tx-dim)] text-[9px]">—</span>}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => recheck(item.domain, item.name)}
-                            disabled={checking[item.domain]}
+                          <button onClick={() => recheck(item.domain, item.name)} disabled={checking[item.domain]}
                             className="text-[10px] text-[var(--tx-muted)] hover:text-[var(--accent)] transition-colors"
-                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}
-                          >
+                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
                             {checking[item.domain] ? '...' : '⇄'}
                           </button>
-                          <button
-                            onClick={() => remove(item.domain)}
+                          <button onClick={() => remove(item.domain)}
                             className="text-[10px] text-[var(--tx-muted)] hover:text-[var(--danger)] transition-colors"
-                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}
-                          >
-                            ✕
-                          </button>
+                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}>✕</button>
                         </div>
                       </td>
                     </tr>

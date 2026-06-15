@@ -1,16 +1,14 @@
 import { useState, useRef, Fragment } from 'react'
 
 function Badge({ label, color }) {
-  const colors = {
-    good: 'text-[var(--safe)] border-[var(--safe)]',
-    moderate: 'text-[var(--warn)] border-[var(--warn)]',
-    poor: 'text-[var(--danger)] border-[var(--danger)]',
-    none: 'text-[var(--tx-muted)] border-[var(--tx-muted)]',
-  }
   const pct = parseInt(label)
   return (
-    <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${colors[color] || colors.none}`}
-      style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+    <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${
+      color === 'good' ? 'text-[var(--safe)] border-[var(--safe)]' :
+      color === 'moderate' ? 'text-[var(--warn)] border-[var(--warn)]' :
+      color === 'poor' ? 'text-[var(--danger)] border-[var(--danger)]' :
+      'text-[var(--tx-muted)] border-[var(--tx-muted)]'
+    }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
       {!isNaN(pct) ? `${pct}%` : label}
     </span>
   )
@@ -44,7 +42,6 @@ function ExpandedDetail({ r }) {
   if (!r.domain) return (
     <div className="px-4 py-3 text-[10px] text-[var(--danger)]">no domain found for this company</div>
   )
-
   return (
     <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
@@ -52,9 +49,7 @@ function ExpandedDetail({ r }) {
           <DetailRow label="Risk" value={r.mxRisk} status={r.mxRisk} />
           <DetailRow label="Provider" value={r.mxDetail?.providers?.join(', ') || '—'} />
           <DetailRow label="MX Count" value={r.mxDetail?.mxCount != null ? String(r.mxDetail.mxCount) : '—'} />
-          {r.mxDetail?.mxRecords?.map((rec, i) => (
-            <DetailRow key={i} label={`MX ${i+1}`} value={rec} />
-          ))}
+          {r.mxDetail?.mxRecords?.map((rec, i) => <DetailRow key={i} label={`MX ${i+1}`} value={rec} />)}
         </Section>
       </div>
       <div>
@@ -64,13 +59,8 @@ function ExpandedDetail({ r }) {
           <DetailRow label="DMARC" value={r.dnsAuth?.dmarc?.raw} status={r.dnsAuth?.dmarc?.policy || 'missing'} />
         </Section>
         <Section title="BLACKLIST">
-          {r.blacklist?.listed ? (
-            r.blacklist.checks.map((c, i) => (
-              <DetailRow key={i} label={`BL ${i+1}`} value={`${c.ip} → ${c.blacklist}`} status="poor" />
-            ))
-          ) : (
-            <DetailRow label="Status" value="not listed on any DNSBL" status={true} />
-          )}
+          {r.blacklist?.listed ? r.blacklist.checks.map((c, i) => <DetailRow key={i} label={`BL ${i+1}`} value={`${c.ip} → ${c.blacklist}`} status="poor" />)
+            : <DetailRow label="Status" value="not listed on any DNSBL" status={true} />}
         </Section>
         <Section title="LANDING PROBABILITY">
           <div className="flex items-center gap-2 mb-2">
@@ -80,10 +70,8 @@ function ExpandedDetail({ r }) {
             </span>
             <span className="text-[10px] text-[var(--tx-muted)]">chance your email lands</span>
           </div>
-          <p className={`text-[10px] tracking-wider ${
-            r.deliverability?.level === 'good' ? 'text-[var(--safe)]' :
-            r.deliverability?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'
-          }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+          <p className={`text-[10px] tracking-wider ${r.deliverability?.level === 'good' ? 'text-[var(--safe)]' : r.deliverability?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'}`}
+            style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
             {r.deliverability?.level === 'good' ? 'HIGH CHANCE — send cold campaigns' :
              r.deliverability?.level === 'moderate' ? 'MODERATE RISK — test low volume first' :
              r.deliverability?.level === 'poor' ? 'HIGH RISK — use LinkedIn / phone outreach' :
@@ -129,7 +117,7 @@ export default function BulkScanner() {
   const runScan = async () => {
     const lines = input.split('\n').map(l => l.trim()).filter(Boolean)
     if (lines.length === 0) return
-    setLoading(true); setError(null); setStatus(`SCANNING ${lines.length} ITEMS...`)
+    setLoading(true); setError(null); setStatus(`SCANNING ${lines.length} ITEMS (5 AT A TIME)...`)
 
     const items = lines.map(l => {
       const isDomain = l.includes('.') && !l.includes(' ')
@@ -163,15 +151,16 @@ export default function BulkScanner() {
 
   const exportCSV = () => {
     if (results.length === 0) return
-    const header = 'name,domain,mx_risk,mx_provider,mx_count,dns_spf,dns_dkim,dns_dmarc,blacklisted,deliverability_score,deliverability_level,signals\n'
+    const header = 'name,domain,mx_risk,mx_provider,channel,landing_probability,dns_spf,dns_dkim,dns_dmarc,blacklisted,recommendation\n'
     const rows = results.map(r => {
       const prov = r.mxDetail?.providers?.join('; ') || ''
+      const ch = r.deliverability?.level === 'good' ? 'EMAIL' : r.deliverability?.level === 'moderate' ? 'TEST' : r.deliverability?.level === 'poor' ? 'LINKEDIN' : '—'
+      const rec = r.deliverability?.level === 'good' ? 'send cold campaigns' : r.deliverability?.level === 'moderate' ? 'test low volume' : r.deliverability?.level === 'poor' ? 'use LinkedIn/phone' : '—'
       return [
-        `"${r.name}"`, `"${r.domain}"`, r.mxRisk || '',
-        `"${prov}"`, r.mxDetail?.mxCount ?? '', r.dnsAuth?.spf?.status || '',
+        `"${r.name}"`, `"${r.domain}"`, r.mxRisk || '', `"${prov}"`, ch,
+        `${r.deliverability?.score ?? ''}%`, r.dnsAuth?.spf?.status || '',
         r.dnsAuth?.dkim?.found ? 'OK' : '', r.dnsAuth?.dmarc?.policy || '',
-        r.blacklist?.listed ? 'YES' : '', r.deliverability?.score ?? '',
-        r.deliverability?.level || '', `"${(r.deliverability?.signals || []).join('; ')}"`
+        r.blacklist?.listed ? 'YES' : '', rec,
       ].join(',')
     }).join('\n')
     const blob = new Blob([header + rows], { type: 'text/csv' })
@@ -187,42 +176,31 @@ export default function BulkScanner() {
   return (
     <div>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[var(--tx-muted)] tracking-wider">
-        <span>⚡ COMPANY NAMES → DOMAINS → MX + SPF/DKIM/DMARC + BLACKLIST + LANDING %</span>
+        <span>⚡ 5 PARALLEL · MX + DNS + BLACKLIST PER ITEM</span>
         <span>⊘ MAX 100/REQ</span>
         <span>⏱ 30 SCANS/15M</span>
       </div>
 
-      <div
-        onDrop={handleDrop}
-        onDragOver={e => e.preventDefault()}
+      <div onDrop={handleDrop} onDragOver={e => e.preventDefault()}
         className="chrome-border p-4 md:p-6 mb-4 text-center cursor-pointer transition-colors hover:border-[var(--border-active)]"
-        style={{ background: 'var(--surface)' }}
-        onClick={() => fileInputRef.current?.click()}
-      >
+        style={{ background: 'var(--surface)' }} onClick={() => fileInputRef.current?.click()}>
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileSelect} className="hidden" />
         <p className="text-[var(--tx-secondary)] text-xs md:text-sm mb-2 tracking-wider" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>ENTER COMPANY NAMES OR DOMAINS</p>
         <p className="text-[10px] text-[var(--tx-muted)] tracking-wider">one per line · auto-detects domains vs company names · or drop CSV</p>
       </div>
 
-      <textarea
-        value={input}
-        onChange={e => setInput(e.target.value)}
+      <textarea value={input} onChange={e => setInput(e.target.value)}
         placeholder={`acme corp\nstripe\nstripe.com → auto-detected as domain`}
         className="w-full h-24 md:h-28 chrome-surface text-xs text-[var(--tx-secondary)] p-3 mb-4 resize-none outline-none"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-      />
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }} />
 
       <div className="flex items-center gap-3 mb-6">
         <button onClick={runScan} disabled={loading || !input.trim()} className="chrome-button px-4 py-2 text-xs">◈ SCAN</button>
-        {results.length > 0 && (
-          <button onClick={exportCSV} className="chrome-button px-4 py-2 text-xs">⬇ EXPORT CSV</button>
-        )}
-        {loading && (
-          <div className="flex items-center gap-2 text-xs text-[var(--tx-muted)]">
-            <div className="w-3 h-3 border border-[var(--accent)] animate-spin" style={{ boxShadow: '0 0 6px var(--accent-shadow)' }} />
-            {status}
-          </div>
-        )}
+        {results.length > 0 && <button onClick={exportCSV} className="chrome-button px-4 py-2 text-xs">⬇ EXPORT CSV</button>}
+        {loading && <div className="flex items-center gap-2 text-xs text-[var(--tx-muted)]">
+          <div className="w-3 h-3 border border-[var(--accent)] animate-spin" style={{ boxShadow: '0 0 6px var(--accent-shadow)' }} />
+          {status}
+        </div>}
         {!loading && status && <span className="text-xs text-[var(--tx-muted)] tracking-wider">{status}</span>}
         {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
       </div>
@@ -253,6 +231,7 @@ export default function BulkScanner() {
                   <th className="text-left px-4 py-3 font-medium">COMPANY</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">DOMAIN</th>
                   <th className="text-left px-4 py-3 font-medium">FIREWALL</th>
+                  <th className="text-left px-4 py-3 font-medium">CHANNEL</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">SPF</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">DKIM</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">DMARC</th>
@@ -263,73 +242,53 @@ export default function BulkScanner() {
               <tbody>
                 {sortedResults.map((r, i) => (
                   <Fragment key={i}>
-                    <tr
-                      onClick={() => setExpandedRow(expandedRow === i ? null : i)}
+                    <tr onClick={() => setExpandedRow(expandedRow === i ? null : i)}
                       className="border-b border-[var(--border)]/50 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
-                      style={r.deliverability?.level === 'poor' ? { background: 'rgba(255,51,85,0.03)' } : r.deliverability?.level === 'moderate' ? { background: 'rgba(255,204,0,0.03)' } : {}}
-                    >
+                      style={r.deliverability?.level === 'poor' ? { background: 'rgba(255,51,85,0.03)' } : r.deliverability?.level === 'moderate' ? { background: 'rgba(255,204,0,0.03)' } : {}}>
                       <td className="px-4 py-3">
-                        {r.deliverability ? (
-                          <Badge label={`${r.deliverability.score}`} color={r.deliverability.level} />
-                        ) : <span className="text-[var(--tx-muted)]">—</span>}
+                        {r.deliverability ? <Badge label={`${r.deliverability.score}`} color={r.deliverability.level} /> : <span className="text-[var(--tx-muted)]">—</span>}
                       </td>
                       <td className="px-4 py-3 text-[var(--tx-primary)] max-w-[120px] md:max-w-[160px] truncate">{r.name}</td>
                       <td className="px-4 py-3 text-[var(--tx-secondary)] hide-mobile">{r.domain || <span className="text-[var(--tx-muted)]">—</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-0.5">
-                          <span className={`text-[10px] tracking-wider ${
-                            r.mxRisk === 'high' ? 'text-[var(--danger)]' : r.mxRisk === 'medium' ? 'text-[var(--warn)]' : r.mxRisk === 'low' ? 'text-[var(--safe)]' : 'text-[var(--tx-muted)]'
-                          }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                            {r.mxRisk || '—'}
-                          </span>
+                          <span className={`text-[10px] tracking-wider ${r.mxRisk === 'high' ? 'text-[var(--danger)]' : r.mxRisk === 'medium' ? 'text-[var(--warn)]' : r.mxRisk === 'low' ? 'text-[var(--safe)]' : 'text-[var(--tx-muted)]'}`}
+                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{r.mxRisk || '—'}</span>
                           <span className="text-[9px] text-[var(--tx-muted)] max-w-[100px] md:max-w-[120px] truncate" title={(r.mxDetail?.providers || []).join(', ')}>
                             {(r.mxDetail?.providers || []).join(', ') || ''}
                           </span>
                         </div>
                       </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${r.deliverability?.level === 'good' ? 'text-[var(--safe)] border-[var(--safe)]' : r.deliverability?.level === 'moderate' ? 'text-[var(--warn)] border-[var(--warn)]' : 'text-[var(--danger)] border-[var(--danger)]'}`}
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                          {r.deliverability?.level === 'good' ? 'EMAIL' : r.deliverability?.level === 'moderate' ? 'TEST' : r.deliverability?.level === 'poor' ? 'LINKEDIN' : '—'}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 hide-mobile">
                         <span className={`text-[10px] ${r.dnsAuth?.spf?.status === 'pass' ? 'text-[var(--safe)]' : r.dnsAuth?.spf?.status === 'missing' ? 'text-[var(--danger)]' : 'text-[var(--warn)]'}`}
-                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {r.dnsAuth?.spf?.status || '—'}
-                        </span>
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{r.dnsAuth?.spf?.status || '—'}</span>
                       </td>
                       <td className="px-4 py-3 hide-mobile">
                         <span className={`text-[10px] ${r.dnsAuth?.dkim?.found ? 'text-[var(--safe)]' : 'text-[var(--danger)]'}`}
-                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {r.dnsAuth?.dkim?.found ? 'OK' : '—'}
-                        </span>
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{r.dnsAuth?.dkim?.found ? 'OK' : '—'}</span>
                       </td>
                       <td className="px-4 py-3 hide-mobile">
                         <span className={`text-[10px] ${r.dnsAuth?.dmarc?.policy === 'reject' ? 'text-[var(--safe)]' : r.dnsAuth?.dmarc?.policy === 'none' || !r.dnsAuth?.dmarc ? 'text-[var(--danger)]' : 'text-[var(--warn)]'}`}
-                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {r.dnsAuth?.dmarc?.policy || '—'}
-                        </span>
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{r.dnsAuth?.dmarc?.policy || '—'}</span>
                       </td>
                       <td className="px-4 py-3 hide-mobile">
                         <span className={`text-[10px] ${r.blacklist?.listed ? 'text-[var(--danger)]' : 'text-[var(--tx-muted)]'}`}
-                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                          {r.blacklist?.listed ? 'YES' : '—'}
-                        </span>
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{r.blacklist?.listed ? 'YES' : '—'}</span>
                       </td>
                       <td className="px-4 py-3">
-                        {r.domain && (
-                          <button
-                            onClick={e => { e.stopPropagation(); addToWatchlist(r.domain, r.name); }}
-                            className="text-[10px] text-[var(--tx-muted)] hover:text-[var(--accent)] transition-colors"
-                            style={{ fontFamily: "'Bebas Neue', sans-serif" }}
-                            title="add to watchlist"
-                          >
-                            +
-                          </button>
-                        )}
+                        {r.domain && <button onClick={e => { e.stopPropagation(); addToWatchlist(r.domain, r.name); }}
+                          className="text-[10px] text-[var(--tx-muted)] hover:text-[var(--accent)] transition-colors"
+                          style={{ fontFamily: "'Bebas Neue', sans-serif" }} title="add to watchlist">+</button>}
                       </td>
                     </tr>
                     {expandedRow === i && (
-                      <tr key={`${i}-detail`}>
-                        <td colSpan={9} className="p-0" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                          <ExpandedDetail r={r} />
-                        </td>
-                      </tr>
+                      <tr key={`${i}-detail`}><td colSpan={10} className="p-0" style={{ background: 'rgba(0,0,0,0.15)' }}><ExpandedDetail r={r} /></td></tr>
                     )}
                   </Fragment>
                 ))}
@@ -337,7 +296,7 @@ export default function BulkScanner() {
             </table>
           </div>
           <div className="text-[10px] text-[var(--tx-dim)] px-4 py-2 border-t border-[var(--border)] tracking-wider">
-            click any row for full MX records, SPF/DKIM/DMARC text, blacklist IPs & landing probability
+            click any row for details · CHANNEL column shows recommended outreach method
           </div>
         </div>
       )}
@@ -345,7 +304,7 @@ export default function BulkScanner() {
       {results.length === 0 && !loading && (
         <div className="chrome-surface text-center py-12 md:py-16">
           <p className="text-[var(--tx-muted)] text-base md:text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>TARGET SCANNER</p>
-          <p className="text-[var(--tx-dim)] text-xs">one place for every signal: MX firewall + SPF/DKIM/DMARC + blacklist + landing probability</p>
+          <p className="text-[var(--tx-dim)] text-xs">one place for every signal: MX firewall + DNS auth + blacklist + landing probability + channel recommendation</p>
         </div>
       )}
     </div>

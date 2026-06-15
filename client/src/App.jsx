@@ -6,6 +6,7 @@ import ChartPanel from './components/ChartPanel'
 import HealthGauge from './components/HealthGauge'
 import BulkScanner from './components/BulkScanner'
 import VolumePanel from './components/VolumePanel'
+import SenderDiagnostics from './components/SenderDiagnostics'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
 
@@ -162,6 +163,7 @@ export default function App() {
         <div className="flex gap-1.5 md:gap-2 mb-6 md:mb-8 overflow-x-auto pb-1">
           <Tab active={tab === 'health'} label="Health" icon="◆" onClick={() => setTab('health')} />
           <Tab active={tab === 'scanner'} label="Scanner" icon="◎" onClick={() => setTab('scanner')} />
+          <Tab active={tab === 'status'} label="Status" icon="◈" onClick={() => setTab('status')} />
           <Tab active={tab === 'watch'} label="Watch" icon="✦" onClick={() => setTab('watch')} />
           <Tab active={tab === 'settings'} label="Config" icon="◇" onClick={() => setTab('settings')} />
         </div>
@@ -223,6 +225,8 @@ export default function App() {
           )
         ) : tab === 'scanner' ? (
           <BulkScanner />
+        ) : tab === 'status' ? (
+          <SenderDiagnostics />
         ) : tab === 'watch' ? (
           <Watchlist />
         ) : (
