@@ -19,16 +19,48 @@ async function resolveMxViaDoh(domain) {
     });
 }
 
+const PROVIDER_CONFIGS = {
+  instantly: {
+    baseUrl: 'https://api.instantly.ai/api/v1',
+    listEndpoint: (apiKey) => `/account/list?api_key=${apiKey}&limit=100`,
+    parseResponse: (data) => (data.accounts || []).map(a => ({
+      email: a.email,
+      status: a.status || 'unknown',
+      warmup_status: a.warmup_status || 'unknown',
+      stat_warmup_score: a.stat_warmup_score ?? 100,
+      setup_pending: !!a.setup_pending,
+      payload: a.payload || {},
+      tracking_domain_status: a.payload?.tracking_domain?.status,
+    })),
+  },
+  smartlead: {
+    baseUrl: 'https://server.smartlead.ai/api/v1',
+    listEndpoint: (apiKey) => `/email-accounts/?api_key=${apiKey}&limit=100`,
+    parseResponse: (data) => {
+      const accounts = Array.isArray(data) ? data : (data.data || []);
+      return accounts.map(a => ({
+        email: a.email || '',
+        status: a.is_smtp_success !== false ? 'active' : 'connection_error',
+        warmup_status: a.email_warmup_status === 'ACTIVE' ? 'active' :
+                       a.email_warmup_status === 'INACTIVE' ? 'paused' : 'disabled',
+        stat_warmup_score: a.warmup_score ?? 100,
+        setup_pending: false,
+        payload: {},
+        tracking_domain_status: null,
+      }));
+    },
+  },
+};
+
 const app = express();
 const PORT = process.env.PORT || 3456;
-const API_KEY = process.env.INSTANTLY_API_KEY || 'j5qdbgdn6hmqsaqfwnvmh9m84tej';
-const INSTANTLY_BASE = 'https://api.instantly.ai/api/v1';
+const FALLBACK_API_KEY = process.env.INSTANTLY_API_KEY || 'j5qdbgdn6hmqsaqfwnvmh9m84tej';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// State (per-instance in serverless — fetched fresh each time)
+// Per-instance cache (used in local mode only)
 let cachedAccounts = [];
 let healthHistory = [];
 let alerts = [];
@@ -50,7 +82,7 @@ function computeHealthScore(account) {
 
   if (account.setup_pending) score -= 15;
 
-  const ctd = account.payload?.tracking_domain?.status;
+  const ctd = account.tracking_domain_status;
   if (ctd && ctd !== 'CTD_ACTIVE') {
     if (ctd === 'CTD_FAILED' || ctd === 'CTD_EXPIRED') score -= 20;
     else if (ctd === 'CTD_PENDING') score -= 10;
@@ -66,73 +98,80 @@ function getHealthLabel(score) {
   return 'critical';
 }
 
-function checkForAlerts(accounts) {
-  const newAlerts = [];
+function computeAlerts(accounts) {
+  const result = [];
   for (const a of accounts) {
     const score = computeHealthScore(a);
     const label = getHealthLabel(score);
 
     if (label === 'critical') {
-      newAlerts.push({ email: a.email, type: 'critical', message: `Critical: ${a.email} health score is ${score}`, timestamp: new Date().toISOString(), score });
+      result.push({ email: a.email, type: 'critical', message: `Critical: ${a.email} health score is ${score}`, timestamp: new Date().toISOString(), score });
     } else if (label === 'poor') {
-      newAlerts.push({ email: a.email, type: 'poor', message: `Warning: ${a.email} health score dropped to ${score}`, timestamp: new Date().toISOString(), score });
+      result.push({ email: a.email, type: 'poor', message: `Warning: ${a.email} health score dropped to ${score}`, timestamp: new Date().toISOString(), score });
     }
     if (a.warmup_status === 'banned') {
-      newAlerts.push({ email: a.email, type: 'banned', message: `BANNED: ${a.email} warmup was banned!`, timestamp: new Date().toISOString(), score });
+      result.push({ email: a.email, type: 'banned', message: `BANNED: ${a.email} warmup was banned!`, timestamp: new Date().toISOString(), score });
     }
     if (a.status === 'connection_error') {
-      newAlerts.push({ email: a.email, type: 'connection', message: `${a.email} has connection error`, timestamp: new Date().toISOString(), score });
+      result.push({ email: a.email, type: 'connection', message: `${a.email} has connection error`, timestamp: new Date().toISOString(), score });
     }
   }
-  alerts = newAlerts.slice(0, 50);
+  return result.slice(0, 50);
 }
 
-async function fetchAccounts() {
-  try {
-    const res = await fetch(`${INSTANTLY_BASE}/account/list?api_key=${API_KEY}&limit=100`);
-    const data = await res.json();
-    const accounts = data.accounts || [];
+async function fetchAccounts(provider, apiKey) {
+  const config = PROVIDER_CONFIGS[provider];
+  if (!config) throw new Error(`Unknown provider: ${provider}`);
 
-    const enriched = accounts.map(a => ({
-      ...a,
-      health_score: computeHealthScore(a),
-      health_label: getHealthLabel(computeHealthScore(a)),
-    }));
+  const url = `${config.baseUrl}${config.listEndpoint(apiKey)}`;
+  const res = await fetch(url);
+  const rawData = await res.json();
 
-    const now = Date.now();
-    for (const a of enriched) {
-      const prev = cachedAccounts.find(p => p.email === a.email);
-      if (prev && a.health_score < prev.health_score && (prev.health_score - a.health_score) >= 5) {
-        alerts.unshift({
-          email: a.email, type: 'drop',
-          message: `${a.email} health dropped ${prev.health_score - a.health_score}pts (${prev.health_score} → ${a.health_score})`,
-          timestamp: new Date().toISOString(), score: a.health_score,
-        });
-      }
-    }
-    alerts = alerts.slice(0, 50);
-
-    healthHistory.push({
-      timestamp: now,
-      accounts: enriched.map(a => ({ email: a.email, score: a.health_score, status: a.status }))
-    });
-    if (healthHistory.length > 100) healthHistory = healthHistory.slice(-100);
-
-    cachedAccounts = enriched;
-    lastFetch = now;
-    checkForAlerts(enriched);
-    return enriched;
-  } catch (err) {
-    console.error('Fetch error:', err.message);
-    return cachedAccounts;
+  if (!res.ok) {
+    const errMsg = rawData.message || rawData.error || `HTTP ${res.status}`;
+    throw new Error(`${provider}: ${errMsg}`);
   }
+
+  const rawAccounts = config.parseResponse(rawData);
+  const enriched = rawAccounts.map(a => ({
+    ...a,
+    health_score: computeHealthScore(a),
+    health_label: getHealthLabel(computeHealthScore(a)),
+  }));
+
+  // Update local cache
+  const now = Date.now();
+  cachedAccounts = enriched;
+  lastFetch = now;
+  alerts = computeAlerts(enriched);
+
+  healthHistory.push({
+    timestamp: now,
+    accounts: enriched.map(a => ({ email: a.email, score: a.health_score, status: a.status }))
+  });
+  if (healthHistory.length > 100) healthHistory = healthHistory.slice(-100);
+
+  return enriched;
 }
 
 // ─── Instantly Health Monitor Routes ───
 
+function getRequestCredentials(req) {
+  const provider = req.headers['x-provider'] || 'instantly';
+  const apiKey = req.headers['x-api-key'] || FALLBACK_API_KEY;
+  return { provider, apiKey };
+}
+
 app.get('/api/accounts', async (req, res) => {
-  const accounts = await fetchAccounts();
-  res.json({ accounts, lastFetch, alertsCount: alerts.length });
+  const { provider, apiKey } = getRequestCredentials(req);
+  if (!apiKey) return res.status(400).json({ error: 'No API key provided. Set it in Settings or via INSTANTLY_API_KEY env var.' });
+
+  try {
+    const accounts = await fetchAccounts(provider, apiKey);
+    res.json({ accounts, lastFetch, alertsCount: alerts.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/alerts', (req, res) => {
@@ -144,9 +183,16 @@ app.get('/api/history', (req, res) => {
 });
 
 app.get('/api/stats', async (req, res) => {
-  if (cachedAccounts.length === 0 && API_KEY) {
-    await fetchAccounts();
+  const { provider, apiKey } = getRequestCredentials(req);
+
+  if (cachedAccounts.length === 0 && apiKey) {
+    try {
+      await fetchAccounts(provider, apiKey);
+    } catch (err) {
+      return res.json({ total: 0, byLabel: {}, byStatus: {}, byWarmup: {}, avgHealth: 0 });
+    }
   }
+
   const byLabel = { healthy: 0, warning: 0, poor: 0, critical: 0 };
   const byStatus = {};
   const byWarmup = {};
@@ -293,9 +339,10 @@ if (fs.existsSync(clientDist)) {
 let monitorInterval = null;
 
 const startMonitor = () => {
-  if (!API_KEY) { console.log('No Instantly API key — health monitor disabled'); return; }
-  fetchAccounts().then(() => console.log(`Initial fetch: ${cachedAccounts.length} accounts`));
-  monitorInterval = setInterval(fetchAccounts, 30_000);
+  const apiKey = FALLBACK_API_KEY;
+  if (!apiKey) { console.log('No API key — health monitor disabled'); return; }
+  fetchAccounts('instantly', apiKey).then(() => console.log(`Initial fetch: ${cachedAccounts.length} accounts`));
+  monitorInterval = setInterval(() => fetchAccounts('instantly', FALLBACK_API_KEY), 30_000);
 };
 
 // ─── Start (local only) ───
