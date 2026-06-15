@@ -178,6 +178,29 @@ async function fetchAccounts(provider, apiKey) {
   });
   if (healthHistory.length > 100) healthHistory = healthHistory.slice(-100);
 
+  // Volume snapshot
+  const totalCapacity = enriched.reduce((s, a) => s + parseInt(a.payload?.daily_limit || 0, 10), 0);
+  const activeSending = enriched.filter(a => a.status === 'active' && a.warmup_status !== 'disabled').length;
+  const estDailySent = Math.round(enriched.reduce((s, a) => {
+    const limit = parseInt(a.payload?.daily_limit || 0, 10);
+    if (a.status === 'connection_error') return s;
+    if (a.warmup_status === 'active') return s + Math.round(limit * 0.8);
+    if (a.warmup_status === 'paused') return s + Math.round(limit * 0.3);
+    return s + Math.round(limit * 0.5);
+  }, 0));
+  volumeHistory.push({
+    timestamp: now,
+    totalCapacity,
+    estDailySent,
+    accountCount: enriched.length,
+    activeCount: activeSending,
+  });
+  if (volumeHistory.length > 2880) volumeHistory = volumeHistory.slice(-2880);
+  // Persist compact snapshot to file every 5 minutes
+  if (volumeHistory.length % 10 === 0) {
+    try { fs.writeFileSync(VOLUME_FILE, JSON.stringify(volumeHistory.slice(-288))); } catch {}
+  }
+
   return enriched;
 }
 
@@ -603,6 +626,71 @@ app.delete('/api/watchlist/:domain', (req, res) => {
   watchlist = watchlist.filter(w => w.domain !== req.params.domain);
   saveWatchlist(watchlist);
   res.json({ watchlist });
+});
+
+// ─── Volume Tracking ───
+
+const VOLUME_FILE = path.join(__dirname, '..', 'volume_history.json');
+let volumeHistory = [];
+
+function loadVolumeHistory() {
+  try {
+    if (fs.existsSync(VOLUME_FILE)) {
+      const raw = fs.readFileSync(VOLUME_FILE, 'utf8');
+      volumeHistory = JSON.parse(raw);
+    }
+  } catch {}
+}
+loadVolumeHistory();
+
+app.get('/api/volume', async (req, res) => {
+  const { provider, apiKey } = getRequestCredentials(req);
+
+  if (volumeHistory.length === 0 && apiKey) {
+    try {
+      await fetchAccounts(provider, apiKey);
+    } catch {}
+  }
+
+  const recent = volumeHistory.slice(-288); // last ~24h at 30s intervals
+  const byDay = {};
+  const byWeek = {};
+  for (const v of recent) {
+    const day = new Date(v.timestamp).toISOString().slice(0, 10);
+    const week = `${new Date(v.timestamp).getFullYear()}-W${String(Math.ceil(new Date(v.timestamp).getDate() / 7)).padStart(2, '0')}`;
+    if (!byDay[day]) byDay[day] = { day, totalCapacity: 0, estDailySent: 0, count: 0 };
+    byDay[day].totalCapacity += v.totalCapacity;
+    byDay[day].estDailySent += v.estDailySent;
+    byDay[day].count++;
+    if (!byWeek[week]) byWeek[week] = { week, totalCapacity: 0, estDailySent: 0, count: 0 };
+    byWeek[week].totalCapacity += v.totalCapacity;
+    byWeek[week].estDailySent += v.estDailySent;
+    byWeek[week].count++;
+  }
+
+  const latest = recent[recent.length - 1] || { totalCapacity: 0, estDailySent: 0, accountCount: 0, activeCount: 0 };
+
+  // Average daily values
+  const dailyAvg = Object.values(byDay).map(d => ({
+    day: d.day,
+    capacity: Math.round(d.totalCapacity / d.count),
+    sent: Math.round(d.estDailySent / d.count),
+  }));
+
+  res.json({
+    today: {
+      capacity: latest.totalCapacity,
+      estimatedSent: latest.estDailySent,
+      accountCount: latest.accountCount,
+      activeCount: latest.activeCount,
+    },
+    daily: dailyAvg,
+    weekly: Object.values(byWeek).map(w => ({
+      week: w.week,
+      capacity: Math.round(w.totalCapacity / w.count),
+      sent: Math.round(w.estDailySent / w.count),
+    })),
+  });
 });
 
 // ─── Serve Frontend (local only) ───

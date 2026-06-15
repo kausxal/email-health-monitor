@@ -7,10 +7,11 @@ function Badge({ label, color }) {
     poor: 'text-[var(--danger)] border-[var(--danger)]',
     none: 'text-[var(--tx-muted)] border-[var(--tx-muted)]',
   }
+  const pct = parseInt(label)
   return (
     <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${colors[color] || colors.none}`}
       style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-      {label}
+      {!isNaN(pct) ? `${pct}%` : label}
     </span>
   )
 }
@@ -71,14 +72,21 @@ function ExpandedDetail({ r }) {
             <DetailRow label="Status" value="not listed on any DNSBL" status={true} />
           )}
         </Section>
-        <Section title="RECOMMENDATION">
+        <Section title="LANDING PROBABILITY">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`text-lg ${r.deliverability?.level === 'good' ? 'text-[var(--safe)]' : r.deliverability?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'}`}
+              style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.04em' }}>
+              {r.deliverability?.score || '?'}%
+            </span>
+            <span className="text-[10px] text-[var(--tx-muted)]">chance your email lands</span>
+          </div>
           <p className={`text-[10px] tracking-wider ${
             r.deliverability?.level === 'good' ? 'text-[var(--safe)]' :
             r.deliverability?.level === 'moderate' ? 'text-[var(--warn)]' : 'text-[var(--danger)]'
           }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-            {r.deliverability?.level === 'good' ? 'EMAIL SAFE — send cold campaigns' :
-             r.deliverability?.level === 'moderate' ? 'TEST FIRST — low volume, monitor bounces' :
-             r.deliverability?.level === 'poor' ? 'AVOID EMAIL — use LinkedIn / phone outreach' :
+            {r.deliverability?.level === 'good' ? 'HIGH CHANCE — send cold campaigns' :
+             r.deliverability?.level === 'moderate' ? 'MODERATE RISK — test low volume first' :
+             r.deliverability?.level === 'poor' ? 'HIGH RISK — use LinkedIn / phone outreach' :
              'INSUFFICIENT DATA'}
           </p>
         </Section>
@@ -179,7 +187,7 @@ export default function BulkScanner() {
   return (
     <div>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[var(--tx-muted)] tracking-wider">
-        <span>⚡ COMPANY NAMES → DOMAINS → MX + SPF/DKIM/DMARC + BLACKLIST + SCORE</span>
+        <span>⚡ COMPANY NAMES → DOMAINS → MX + SPF/DKIM/DMARC + BLACKLIST + LANDING %</span>
         <span>⊘ MAX 100/REQ</span>
         <span>⏱ 30 SCANS/15M</span>
       </div>
@@ -224,8 +232,8 @@ export default function BulkScanner() {
           {[
             { label: 'TOTAL', value: results.length, color: 'text-[var(--tx-primary)]', key: 'total' },
             { label: 'DOMAINS FOUND', value: results.filter(r => r.domain).length, color: 'text-[var(--safe)]', key: 'found' },
-            { label: 'EMAIL SAFE', value: results.filter(r => r.deliverability?.level === 'good').length, color: 'text-[var(--safe)]', key: 'good' },
-            { label: 'AVOID EMAIL', value: results.filter(r => r.deliverability?.level === 'poor').length, color: 'text-[var(--danger)]', key: 'poor' },
+            { label: 'HIGH CHANCE', value: results.filter(r => r.deliverability?.level === 'good').length, color: 'text-[var(--safe)]', key: 'good' },
+            { label: 'HIGH RISK', value: results.filter(r => r.deliverability?.level === 'poor').length, color: 'text-[var(--danger)]', key: 'poor' },
           ].map(s => (
             <div key={s.key} className="p-4" style={{ background: 'var(--surface)' }}>
               <p className="text-[10px] tracking-[0.12em] text-[var(--tx-muted)] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{s.label}</p>
@@ -241,7 +249,7 @@ export default function BulkScanner() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--border)] text-[var(--tx-muted)] text-[10px] uppercase tracking-wider">
-                  <th className="text-left px-4 py-3 font-medium">SCORE</th>
+                  <th className="text-left px-4 py-3 font-medium">LAND</th>
                   <th className="text-left px-4 py-3 font-medium">COMPANY</th>
                   <th className="text-left px-4 py-3 font-medium hide-mobile">DOMAIN</th>
                   <th className="text-left px-4 py-3 font-medium">FIREWALL</th>
@@ -329,7 +337,7 @@ export default function BulkScanner() {
             </table>
           </div>
           <div className="text-[10px] text-[var(--tx-dim)] px-4 py-2 border-t border-[var(--border)] tracking-wider">
-            click any row for full MX records, SPF/DKIM/DMARC text, blacklist IPs & recommendation
+            click any row for full MX records, SPF/DKIM/DMARC text, blacklist IPs & landing probability
           </div>
         </div>
       )}
@@ -337,7 +345,7 @@ export default function BulkScanner() {
       {results.length === 0 && !loading && (
         <div className="chrome-surface text-center py-12 md:py-16">
           <p className="text-[var(--tx-muted)] text-base md:text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>TARGET SCANNER</p>
-          <p className="text-[var(--tx-dim)] text-xs">one place for every signal: MX firewall + SPF/DKIM/DMARC + blacklist + deliverability score</p>
+          <p className="text-[var(--tx-dim)] text-xs">one place for every signal: MX firewall + SPF/DKIM/DMARC + blacklist + landing probability</p>
         </div>
       )}
     </div>

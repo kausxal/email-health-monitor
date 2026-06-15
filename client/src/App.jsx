@@ -5,6 +5,7 @@ import AccountList from './components/AccountList'
 import ChartPanel from './components/ChartPanel'
 import HealthGauge from './components/HealthGauge'
 import BulkScanner from './components/BulkScanner'
+import VolumePanel from './components/VolumePanel'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
 
@@ -181,7 +182,10 @@ export default function App() {
             ) : (
               <>
                 {stats && <StatsBar stats={stats} />}
-                <HealthGauge accounts={accounts} />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-6">
+                  <HealthGauge accounts={accounts} />
+                  <VolumePanel />
+                </div>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6">
                   <AlertsPanel alerts={alerts} />
                   <div className="lg:col-span-2">
