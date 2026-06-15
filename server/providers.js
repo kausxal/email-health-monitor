@@ -1,7 +1,7 @@
 const PROVIDERS = [
   {
     name: "Proofpoint",
-    patterns: ["proofpoint.com", "pphosted.com", "us-mta", "mxo1", "mxout"],
+    patterns: ["proofpoint.com", "pphosted.com", "ppe-hosted.com", "spamexperto.com", "us-mta", "mxo1", "mxout"],
     risk: "high",
     description: "Enterprise email security gateway. High chance of blocking cold email.",
     tag: "email_firewall"
@@ -120,14 +120,14 @@ const PROVIDERS = [
   },
   {
     name: "Microsoft 365 / Exchange Online",
-    patterns: ["protection.outlook.com", "outlook.com", "mail.protection.outlook.com"],
+    patterns: ["protection.outlook.com", "outlook.com", "mail.protection.outlook.com", "mx.microsoft.com", "messaging.microsoft.com", "onmicrosoft.com"],
     risk: "medium",
     description: "Microsoft 365 email. Standard filtering, may still receive cold email.",
     tag: "microsoft"
   },
   {
     name: "Google Workspace",
-    patterns: ["aspmx.l.google.com", "google.com", "googlemail.com"],
+    patterns: ["aspmx.l.google.com", "google.com", "googlemail.com", "mx.google.com"],
     risk: "low",
     description: "Google Workspace. Standard spam filtering. Usually reachable.",
     tag: "google"
@@ -222,6 +222,55 @@ const PROVIDERS = [
     risk: "medium",
     description: "Email security gateway.",
     tag: "email_filter"
+  },
+  {
+    name: "Vade Secure",
+    patterns: ["vadesecure.com", "vade.com", "vade"],
+    risk: "high",
+    description: "AI-powered email security. Filters cold email aggressively.",
+    tag: "email_firewall"
+  },
+  {
+    name: "Inky",
+    patterns: ["inky.com", "inky"],
+    risk: "high",
+    description: "AI email phishing defense.",
+    tag: "email_firewall"
+  },
+  {
+    name: "Trustwave SEG",
+    patterns: ["trustwave.com", "trustwave", "mailcontrol.com"],
+    risk: "high",
+    description: "Enterprise email security gateway (MailControl).",
+    tag: "email_firewall"
+  },
+  {
+    name: "GreatHorn",
+    patterns: ["greathorn.com", "greathorn"],
+    risk: "high",
+    description: "Cloud email security platform.",
+    tag: "email_firewall"
+  },
+  {
+    name: "Ironscales",
+    patterns: ["ironscales.com", "ironscales"],
+    risk: "high",
+    description: "AI email security platform.",
+    tag: "email_firewall"
+  },
+  {
+    name: "Egress Defend",
+    patterns: ["egress.com", "egress"],
+    risk: "high",
+    description: "Intelligent email security gateway.",
+    tag: "email_firewall"
+  },
+  {
+    name: "Avanan (Check Point)",
+    patterns: ["avanan.com", "avanan", "checkpoint.com"],
+    risk: "high",
+    description: "Cloud email security suite.",
+    tag: "email_firewall"
   }
 ];
 

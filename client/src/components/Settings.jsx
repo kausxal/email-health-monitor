@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 
 const PROVIDERS = [
-  { id: 'instantly', name: 'Instantly', baseUrl: 'https://api.instantly.ai/api/v1' },
-  { id: 'smartlead', name: 'Smartlead', baseUrl: 'https://server.smartlead.ai/api/v1' },
+  { id: 'instantly', name: 'INSTANTLY', baseUrl: 'https://api.instantly.ai/api/v1' },
+  { id: 'smartlead', name: 'SMARTLEAD', baseUrl: 'https://server.smartlead.ai/api/v1' },
 ]
 
 export default function Settings({ settings, onSave }) {
@@ -34,7 +34,7 @@ export default function Settings({ settings, onSave }) {
       if (data.error) {
         setTestResult({ ok: false, message: data.error })
       } else {
-        setTestResult({ ok: true, message: `Connected! ${data.accounts?.length || 0} accounts found` })
+        setTestResult({ ok: true, message: `${data.accounts?.length || 0} ACCOUNTS FOUND` })
       }
     } catch (err) {
       setTestResult({ ok: false, message: err.message })
@@ -44,38 +44,34 @@ export default function Settings({ settings, onSave }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Email Provider Settings</h2>
-        <p className="text-gray-400 text-sm mb-6">
-          Connect your email sending platform to monitor account health.
-        </p>
+    <div className="max-w-xl mx-auto">
+      <div className="chrome-surface p-6">
+        <h2 className="text-sm tracking-[0.12em] text-[#d4d4d4] mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>PROVIDER CONFIG</h2>
+        <p className="text-[10px] text-[#555] mb-6 tracking-wider">connect your email sending platform</p>
 
         <div className="space-y-5">
           <div>
-            <label className="block text-sm text-gray-300 mb-1.5 font-medium">Provider</label>
+            <label className="block text-[10px] text-[#555] mb-1.5 tracking-wider uppercase">Provider</label>
             <select
               value={provider}
               onChange={e => setProvider(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50"
+              className="chrome-input w-full px-4 py-2.5 text-xs uppercase tracking-wider"
             >
               {PROVIDERS.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <p className="text-gray-500 text-xs mt-1.5">
-              Base URL: {PROVIDERS.find(p => p.id === provider)?.baseUrl}
-            </p>
+            <p className="text-[#333] text-[10px] mt-1.5 tracking-wider">{PROVIDERS.find(p => p.id === provider)?.baseUrl}</p>
           </div>
 
           <div>
-            <label className="block text-sm text-gray-300 mb-1.5 font-medium">API Key</label>
+            <label className="block text-[10px] text-[#555] mb-1.5 tracking-wider uppercase">API Key</label>
             <input
               type="password"
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
-              placeholder="Enter your API key..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-gray-200 text-sm focus:outline-none focus:border-emerald-500/50 placeholder-gray-600 font-mono"
+              placeholder="ENTER API KEY..."
+              className="chrome-input w-full px-4 py-2.5 text-xs uppercase tracking-wider placeholder:text-[#333]"
             />
           </div>
 
@@ -83,27 +79,27 @@ export default function Settings({ settings, onSave }) {
             <button
               onClick={handleSave}
               disabled={!apiKey}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-700 disabled:text-gray-500 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              className="chrome-button px-5 py-2.5 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              {saved ? 'Saved!' : 'Save Settings'}
+              {saved ? 'SAVED' : 'SAVE'}
             </button>
 
             <button
               onClick={testConnection}
               disabled={testing || !apiKey}
-              className="bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:text-gray-600 text-gray-300 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors border border-gray-700"
+              className="chrome-button px-5 py-2.5 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              {testing ? 'Testing...' : 'Test Connection'}
+              {testing ? 'TESTING...' : 'TEST'}
             </button>
           </div>
 
           {testResult && (
-            <div className={`mt-2 p-3 rounded-lg text-sm ${
+            <div className={`p-3 text-xs tracking-wider ${
               testResult.ok
-                ? 'bg-emerald-900/30 text-emerald-300 border border-emerald-800/50'
-                : 'bg-red-900/30 text-red-300 border border-red-800/50'
-            }`}>
-              {testResult.ok ? '✓ ' : '✗ '}{testResult.message}
+                ? 'border border-[#00ff88] text-[#00ff88]'
+                : 'border border-[#ff3355] text-[#ff3355]'
+            }`} style={{ background: testResult.ok ? 'rgba(0,255,136,0.04)' : 'rgba(255,51,85,0.04)' }}>
+              {testResult.ok ? '◆ ' : '◇ '}{testResult.message}
             </div>
           )}
         </div>

@@ -7,22 +7,6 @@ import HealthGauge from './components/HealthGauge'
 import MxChecker from './components/MxChecker'
 import Settings from './components/Settings'
 
-function TabButton({ active, label, icon, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${
-        active
-          ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/50 shadow-lg shadow-emerald-900/20'
-          : 'bg-gray-900 text-gray-500 border border-gray-800 hover:border-gray-600 hover:text-gray-300'
-      }`}
-    >
-      <span>{icon}</span>
-      {label}
-    </button>
-  )
-}
-
 const LS_KEY = 'email_monitor_settings'
 
 function loadSettings() {
@@ -30,6 +14,23 @@ function loadSettings() {
     const raw = localStorage.getItem(LS_KEY)
     return raw ? JSON.parse(raw) : { provider: 'instantly', apiKey: '' }
   } catch { return { provider: 'instantly', apiKey: '' } }
+}
+
+function Tab({ active, label, icon, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-5 py-2 text-sm tracking-wider uppercase transition-all duration-150 glitch-hover ${
+        active
+          ? 'text-[#00f0ff] chrome-accent-border'
+          : 'text-[#555] chrome-border hover:text-[#a0a0a0]'
+      }`}
+      style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.08em' }}
+    >
+      <span className="mr-2">{icon}</span>
+      {label}
+    </button>
+  )
 }
 
 export default function App() {
@@ -70,7 +71,7 @@ export default function App() {
       if (statData) setStats(statData)
       if (accData.lastFetch) setLastFetch(accData.lastFetch)
       setError(null)
-    } catch (err) {
+    } catch {
       setError('Failed to connect to server')
     } finally {
       setLoading(false)
@@ -100,35 +101,33 @@ export default function App() {
   const banned = accounts.filter(a => a.warmup_status === 'banned').length
 
   return (
-    <div className="min-h-screen bg-gray-950 p-4 lg:p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen" style={{ background: 'var(--chromium-bg)' }}>
+      <div className="max-w-7xl mx-auto px-4 lg:px-6 py-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Email Infrastructure Monitor</h1>
-            <p className="text-sm text-gray-500">
-              {tab === 'health'
-                ? settings.apiKey
-                  ? `${accounts.length} accounts · Last poll: ${lastFetch ? new Date(lastFetch).toLocaleTimeString() : 'never'}`
-                  : 'Configure API key in Settings'
-                : tab === 'mx'
-                  ? 'Check if company domains use email firewalls that block cold email'
-                  : 'Configure your email provider API key'}
-              {tab === 'health' && settings.apiKey && (
-                <button onClick={fetchData} className="ml-3 text-emerald-500 hover:text-emerald-400 text-xs underline">refresh</button>
-              )}
+            <h1 className="text-3xl md:text-4xl tracking-wider text-white" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+              BLACK CHROMIUM
+            </h1>
+            <p className="text-xs text-[#555] tracking-widest uppercase" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+              email infrastructure monitor
             </p>
           </div>
           {tab === 'health' && (
             <div className="flex items-center gap-3">
               {criticalCount > 0 && (
-                <span className="animate-pulse bg-red-900/50 text-red-300 text-xs px-3 py-1.5 rounded-full font-medium border border-red-800">
+                <span className="chrome-chip bg-red-950/30 text-[#ff3355] border-[#ff3355] animate-pulse">
                   {criticalCount} critical
                 </span>
               )}
               {banned > 0 && (
-                <span className="animate-pulse bg-purple-900/50 text-purple-300 text-xs px-3 py-1.5 rounded-full font-medium border border-purple-800">
+                <span className="chrome-chip bg-purple-950/30 text-[#b366ff] border-[#b366ff] animate-pulse">
                   {banned} banned
+                </span>
+              )}
+              {settings.apiKey && (
+                <span className="text-[#333] text-xs">
+                  {accounts.length} acc · {lastFetch ? new Date(lastFetch).toLocaleTimeString() : '—'}
                 </span>
               )}
             </div>
@@ -136,24 +135,24 @@ export default function App() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-3 mb-6">
-          <TabButton active={tab === 'health'} label="Health Monitor" icon="❤️" onClick={() => setTab('health')} />
-          <TabButton active={tab === 'mx'} label="MX Firewall Checker" icon="🛡️" onClick={() => setTab('mx')} />
-          <TabButton active={tab === 'settings'} label="Settings" icon="⚙️" onClick={() => setTab('settings')} />
+        <div className="flex gap-2 mb-8">
+          <Tab active={tab === 'health'} label="Health" icon="◆" onClick={() => setTab('health')} />
+          <Tab active={tab === 'mx'} label="Firewall" icon="◈" onClick={() => setTab('mx')} />
+          <Tab active={tab === 'settings'} label="Config" icon="◇" onClick={() => setTab('settings')} />
         </div>
 
+        {/* Content */}
         {tab === 'health' ? (
           settings.apiKey ? (
             loading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+              <div className="flex items-center justify-center py-24">
+                <div className="w-5 h-5 border border-[#00f0ff] animate-spin" style={{ boxShadow: '0 0 12px rgba(0,240,255,0.15)' }} />
               </div>
             ) : error ? (
-              <div className="bg-gray-900 border border-red-800 rounded-xl p-8 max-w-md mx-auto text-center">
-                <div className="text-4xl mb-4">⚠️</div>
-                <h2 className="text-xl font-bold text-red-400 mb-2">Connection Error</h2>
-                <p className="text-gray-400 mb-6">{error}</p>
-                <button onClick={fetchData} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">Retry</button>
+              <div className="chrome-surface p-8 max-w-lg mx-auto text-center">
+                <p className="text-[#ff3355] text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>CONNECTION FAILURE</p>
+                <p className="text-[#555] text-xs mb-6">{error}</p>
+                <button onClick={fetchData} className="chrome-button px-6 py-2 text-sm">RETRY</button>
               </div>
             ) : (
               <>
@@ -166,31 +165,32 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 mb-4 flex-wrap">
-                  <input type="text" placeholder="Search email..." value={search} onChange={e => setSearch(e.target.value)}
-                    className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-200 w-64 focus:outline-none focus:border-emerald-500/50 placeholder-gray-600" />
+                  <input type="text" placeholder="SEARCH EMAIL..." value={search} onChange={e => setSearch(e.target.value)}
+                    className="chrome-input px-4 py-2 w-64 text-xs uppercase tracking-wider" />
                   {['all', 'healthy', 'warning', 'poor', 'critical'].map(f => (
                     <button key={f} onClick={() => setFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                      className={`chrome-chip cursor-pointer transition-colors ${
                         filter === f
-                          ? f === 'healthy' ? 'bg-green-900/50 text-green-300 border border-green-700'
-                            : f === 'warning' ? 'bg-yellow-900/50 text-yellow-300 border border-yellow-700'
-                            : f === 'poor' ? 'bg-orange-900/50 text-orange-300 border border-orange-700'
-                            : f === 'critical' ? 'bg-red-900/50 text-red-300 border border-red-700'
-                            : 'bg-gray-800 text-gray-200 border border-gray-700'
-                          : 'bg-gray-900 text-gray-500 border border-gray-800 hover:border-gray-600'
+                          ? f === 'healthy' ? 'text-[#00ff88] border-[#00ff88] bg-green-950/20'
+                            : f === 'warning' ? 'text-[#ffcc00] border-[#ffcc00] bg-yellow-950/20'
+                            : f === 'poor' ? 'text-[#ff8800] border-[#ff8800] bg-orange-950/20'
+                            : f === 'critical' ? 'text-[#ff3355] border-[#ff3355] bg-red-950/20'
+                            : 'text-[#a0a0a0] border-[#2a2a2a] bg-transparent'
+                          : 'text-[#555] border-[#1a1a1a] bg-transparent hover:text-[#a0a0a0] hover:border-[#2a2a2a]'
                       }`}>
                       {f}
                     </button>
                   ))}
+                  <button onClick={fetchData} className="text-[#333] text-xs hover:text-[#555] transition-colors ml-auto uppercase tracking-wider">↻ refresh</button>
                 </div>
                 <AccountList accounts={filteredAccounts} />
               </>
             )
           ) : (
-            <div className="text-center py-20">
-              <p className="text-gray-500 text-lg mb-4">No API key configured</p>
-              <p className="text-gray-600 text-sm mb-6">Go to Settings to connect your email provider.</p>
-              <button onClick={() => setTab('settings')} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors">Open Settings</button>
+            <div className="text-center py-24">
+              <p className="text-[#555] text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>NO API KEY</p>
+              <p className="text-[#333] text-xs mb-6">Configure your provider in Settings</p>
+              <button onClick={() => setTab('settings')} className="chrome-button px-6 py-2">CONFIG</button>
             </div>
           )
         ) : tab === 'mx' ? (
@@ -199,8 +199,8 @@ export default function App() {
           <Settings settings={settings} onSave={saveSettings} />
         )}
 
-        <div className="text-center text-gray-700 text-xs mt-8 pb-4">
-          Email Infrastructure Monitor · {settings.apiKey ? 'Polls every 30s' : 'Configure API key in Settings'}
+        <div className="text-center text-[#1a1a1a] text-xs mt-12 pb-4 tracking-wider">
+          BLACK CHROMIUM · v2.0 · {settings.apiKey ? 'POLL 30s' : 'UNCONFIGURED'}
         </div>
       </div>
     </div>

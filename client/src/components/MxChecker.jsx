@@ -2,25 +2,17 @@ import { useState, useRef } from 'react'
 
 function RiskBadge({ risk }) {
   const colors = {
-    low: 'bg-green-900/30 text-green-300 border-green-700/50',
-    medium: 'bg-yellow-900/30 text-yellow-300 border-yellow-700/50',
-    high: 'bg-red-900/30 text-red-300 border-red-700/50',
-    unknown: 'bg-gray-800 text-gray-400 border-gray-700/50',
+    low: 'text-[#00ff88] border-[#00ff88]',
+    medium: 'text-[#ffcc00] border-[#ffcc00]',
+    high: 'text-[#ff3355] border-[#ff3355]',
+    unknown: 'text-[#555] border-[#555]',
   }
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${colors[risk] || colors.unknown}`}>
-      {risk.toUpperCase()}
+    <span className={`text-[10px] px-2 py-0.5 border tracking-wider ${colors[risk] || colors.unknown}`}
+      style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+      {risk}
     </span>
   )
-}
-
-function RiskIcon({ risk }) {
-  return {
-    low: '🟢',
-    medium: '🟡',
-    high: '🔴',
-    unknown: '⚪'
-  }[risk] || '⚪'
 }
 
 export default function MxChecker() {
@@ -35,7 +27,7 @@ export default function MxChecker() {
   const handleFile = async (file) => {
     if (!file) return
     const text = await file.text()
-    setStatus(`Processing ${file.name}...`)
+    setStatus(`PROCESSING ${file.name}...`)
     setLoading(true)
     setError(null)
 
@@ -49,7 +41,7 @@ export default function MxChecker() {
       if (data.error) { setError(data.error); return }
       setResults(data.results || [])
       setSummary(data.summary)
-      setStatus(`Checked ${data.total} domains — ${data.summary?.high || 0} blocked, ${data.summary?.low || 0} safe`)
+      setStatus(`${data.total} DOMAINS · ${data.summary?.high || 0} BLOCKED · ${data.summary?.low || 0} SAFE`)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -69,12 +61,12 @@ export default function MxChecker() {
   }
 
   const handlePaste = async () => {
-    const text = prompt('Paste comma-separated domains (e.g. google.com, stripe.com):')
+    const text = prompt('PASTE DOMAINS (comma-separated):')
     if (!text) return
     const domains = text.split(',').map(s => s.trim()).filter(Boolean)
     if (domains.length === 0) return
 
-    setLoading(true); setError(null); setStatus(`Checking ${domains.length} domains...`)
+    setLoading(true); setError(null); setStatus(`CHECKING ${domains.length} DOMAINS...`)
     try {
       const res = await fetch('/api/mx/lookup', {
         method: 'POST',
@@ -85,7 +77,7 @@ export default function MxChecker() {
       if (data.error) { setError(data.error); return }
       setResults(data.results || [])
       setSummary(data.summary)
-      setStatus(`Checked ${data.total} domains`)
+      setStatus(`${data.total} DOMAINS CHECKED`)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -95,76 +87,74 @@ export default function MxChecker() {
 
   const exportCSV = () => {
     if (results.length === 0) return
-    const header = 'Domain,Company,MX Records,Provider,Risk,Recommendation\n'
+    const header = 'domain,company,provider,risk,mx_records,recommendation\n'
     const rows = results.map(r => {
       const mx = (r.mxRecords || []).join('; ')
       const prov = (r.providers || []).join('; ')
-      const rec = r.risk === 'high' ? 'Use LinkedIn/phone instead of cold email'
-        : r.risk === 'medium' ? 'Test with low volume first'
-        : r.risk === 'low' ? 'Cold email should land normally'
-        : 'Unknown - test first'
-      return `"${r.domain}","${r.company}","${mx}","${prov}","${r.risk}","${rec}"`
+      const rec = r.risk === 'high' ? 'use linkedin/phone' : r.risk === 'medium' ? 'test low volume' : r.risk === 'low' ? 'cold email ok' : 'test first'
+      return `"${r.domain}","${r.company}","${prov}","${r.risk}","${mx}","${rec}"`
     }).join('\n')
     const blob = new Blob([header + rows], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `mx-check-${Date.now()}.csv`; a.click()
+    a.href = url; a.download = `mx-firewall-scan-${Date.now()}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
   const riskOrder = { low: 0, medium: 1, high: 2, unknown: 3 }
   const sortedResults = [...results].sort((a, b) => (riskOrder[b.risk] || 0) - (riskOrder[a.risk] || 0))
 
-  const blockedCount = summary?.high || 0
-  const safeCount = summary?.low || 0
-
   return (
     <div>
+      {/* Limits info bar */}
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[#555] tracking-wider">
+        <span>⚡ BATCH 5 (parallel)</span>
+        <span>⊘ MAX 500/REQ</span>
+        <span>⏱ 100 LOOKUPS/15M</span>
+        <span>◈ 40+ PROVIDERS</span>
+      </div>
+
       {/* Drop Zone */}
       <div
         onDrop={handleDrop}
         onDragOver={e => e.preventDefault()}
-        className="border-2 border-dashed border-gray-700 rounded-xl p-8 mb-6 text-center hover:border-emerald-700/50 transition-colors bg-gray-900/50 cursor-pointer"
+        className="chrome-border p-8 mb-6 text-center cursor-pointer transition-colors hover:border-[#2a2a2a]"
+        style={{ background: 'var(--chromium-surface)' }}
         onClick={() => fileInputRef.current?.click()}
       >
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileSelect} className="hidden" />
-        <div className="text-3xl mb-3">📂</div>
-        <p className="text-gray-300 font-medium mb-1">Drop a CSV here or click to browse</p>
-        <p className="text-xs text-gray-600">CSV should have columns: <code className="text-emerald-500">domain</code>, <code className="text-emerald-500">website</code>, or <code className="text-emerald-500">company website</code></p>
+        <p className="text-[#a0a0a0] text-sm mb-2 tracking-wider" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>DROP CSV</p>
+        <p className="text-[10px] text-[#555] tracking-wider">columns: domain / website / company website</p>
       </div>
 
-      {/* Quick Paste */}
+      {/* Actions */}
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={handlePaste} className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm border border-gray-700 transition-colors">
-          📋 Paste Domains
-        </button>
+        <button onClick={handlePaste} className="chrome-button px-4 py-2 text-xs">◈ PASTE</button>
         {results.length > 0 && (
-          <button onClick={exportCSV} className="bg-emerald-800 hover:bg-emerald-700 text-emerald-200 px-4 py-2 rounded-lg text-sm border border-emerald-700/50 transition-colors">
-            💾 Export CSV
-          </button>
+          <button onClick={exportCSV} className="chrome-button px-4 py-2 text-xs">⬇ EXPORT</button>
         )}
         {loading && (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          <div className="flex items-center gap-2 text-xs text-[#555]">
+            <div className="w-3 h-3 border border-[#00f0ff] animate-spin" style={{ boxShadow: '0 0 6px rgba(0,240,255,0.1)' }} />
             {status}
           </div>
         )}
-        {!loading && status && <span className="text-sm text-gray-500">{status}</span>}
-        {error && <span className="text-sm text-red-400">{error}</span>}
+        {!loading && status && <span className="text-xs text-[#555] tracking-wider">{status}</span>}
+        {error && <span className="text-xs text-[#ff3355]">{error}</span>}
       </div>
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-px mb-6" style={{ background: 'var(--chromium-border)' }}>
           {[
-            { label: 'Total', value: summary.low + summary.medium + summary.high + summary.unknown, color: 'text-gray-200' },
-            { label: 'Safe 🟢', value: summary.low || 0, color: 'text-green-400' },
-            { label: 'Blocked 🔴', value: summary.high || 0, color: blockedCount > 0 ? 'text-red-400 animate-pulse' : 'text-red-400' },
-            { label: 'Unknown ⚪', value: summary.unknown || 0, color: 'text-gray-400' },
+            { label: 'TOTAL', value: summary.low + summary.medium + summary.high + summary.unknown, color: 'text-[#d4d4d4]' },
+            { label: 'SAFE', value: summary.low || 0, color: 'text-[#00ff88]' },
+            { label: 'BLOCKED', value: summary.high || 0, color: summary.high > 0 ? 'text-[#ff3355]' : 'text-[#ff3355]' },
+            { label: 'UNKNOWN', value: summary.unknown || 0, color: 'text-[#555]' },
           ].map(s => (
-            <div key={s.label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-              <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            <div key={s.label} className="p-4" style={{ background: 'var(--chromium-surface)' }}>
+              <p className="text-[10px] tracking-[0.12em] text-[#555] mb-1" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{s.label}</p>
+              <p className={`text-2xl ${s.color}`} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.04em' }}>{s.value}</p>
             </div>
           ))}
         </div>
@@ -172,17 +162,16 @@ export default function MxChecker() {
 
       {/* Results Table */}
       {sortedResults.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="chrome-surface overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase">
-                  <th className="text-left px-4 py-3 font-medium">Risk</th>
-                  <th className="text-left px-4 py-3 font-medium">Domain</th>
-                  <th className="text-left px-4 py-3 font-medium">Company</th>
-                  <th className="text-left px-4 py-3 font-medium">Detected Provider</th>
-                  <th className="text-left px-4 py-3 font-medium">MX Records</th>
-                  <th className="text-left px-4 py-3 font-medium">Recommendation</th>
+                <tr className="border-b border-[#1a1a1a] text-[#555] text-[10px] uppercase tracking-wider">
+                  <th className="text-left px-4 py-3 font-medium">RISK</th>
+                  <th className="text-left px-4 py-3 font-medium">DOMAIN</th>
+                  <th className="text-left px-4 py-3 font-medium">FIREWALL</th>
+                  <th className="text-left px-4 py-3 font-medium">MX RECORDS</th>
+                  <th className="text-left px-4 py-3 font-medium">ACTION</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,20 +179,22 @@ export default function MxChecker() {
                   <tr
                     key={i}
                     onClick={() => setExpandedRow(expandedRow === i ? null : i)}
-                    className={`border-b border-gray-800/50 cursor-pointer transition-colors hover:bg-gray-800/30 ${
-                      r.risk === 'high' ? 'bg-red-950/20' : r.risk === 'medium' ? 'bg-yellow-950/20' : ''
-                    }`}
+                    className="border-b border-[#1a1a1a]/50 cursor-pointer transition-colors hover:bg-white/[0.02]"
+                    style={r.risk === 'high' ? { background: 'rgba(255,51,85,0.03)' } : r.risk === 'medium' ? { background: 'rgba(255,204,0,0.03)' } : {}}
                   >
                     <td className="px-4 py-3"><RiskBadge risk={r.risk} /></td>
-                    <td className="px-4 py-3 font-medium text-gray-200">{r.domain}</td>
-                    <td className="px-4 py-3 text-gray-400">{r.company}</td>
-                    <td className="px-4 py-3 text-gray-300">{(r.providers || []).join(', ') || 'None'}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
-                      {(r.mxRecords || []).join(', ') || '—'}
-                    </td>
+                    <td className="px-4 py-3 font-medium text-[#d4d4d4]">{r.domain}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs ${r.risk === 'high' ? 'text-red-400' : r.risk === 'medium' ? 'text-yellow-400' : r.risk === 'low' ? 'text-green-400' : 'text-gray-500'}`}>
-                        {r.risk === 'high' ? 'Use LinkedIn/phone' : r.risk === 'medium' ? 'Test low volume' : r.risk === 'low' ? 'Cold email OK' : 'Test first'}
+                      <span className={r.risk === 'high' ? 'text-[#ff3355]' : r.risk === 'medium' ? 'text-[#ffcc00]' : r.risk === 'low' ? 'text-[#00ff88]' : 'text-[#555]'}>
+                        {(r.providers || []).join(', ') || '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[#555] truncate-mx">{(r.mxRecords || []).join(', ') || '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-[10px] tracking-wider ${
+                        r.risk === 'high' ? 'text-[#ff3355]' : r.risk === 'medium' ? 'text-[#ffcc00]' : r.risk === 'low' ? 'text-[#00ff88]' : 'text-[#555]'
+                      }`} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                        {r.risk === 'high' ? 'AVOID EMAIL' : r.risk === 'medium' ? 'TEST FIRST' : r.risk === 'low' ? 'EMAIL OK' : 'UNKNOWN'}
                       </span>
                     </td>
                   </tr>
@@ -211,18 +202,18 @@ export default function MxChecker() {
               </tbody>
             </table>
           </div>
-          <div className="text-xs text-gray-600 px-4 py-2 border-t border-gray-800">
-            {sortedResults.length} results · Click a row for details · Sorted by worst risk first
+          <div className="flex justify-between text-[10px] text-[#333] px-4 py-2 border-t border-[#1a1a1a] tracking-wider">
+            <span>{sortedResults.length} RESULTS · CLICK FOR DETAILS · WORST FIRST</span>
+            <span>MAX 500/BATCH</span>
           </div>
         </div>
       )}
 
       {/* Empty State */}
       {results.length === 0 && !loading && (
-        <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
-          <div className="text-4xl mb-4">🛡️</div>
-          <p className="text-gray-400 mb-2">No domains checked yet</p>
-          <p className="text-xs text-gray-600">Import a CSV or paste domains to check if they use email firewalls</p>
+        <div className="chrome-surface text-center py-16">
+          <p className="text-[#555] text-lg mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '0.06em' }}>MX FIREWALL SCANNER</p>
+          <p className="text-[#333] text-xs">upload CSV or paste domains to scan</p>
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const { PROVIDERS, extractDomain, identifyProvider, highestRisk, riskLabel } = require('./providers');
 const fs = require('fs');
 
@@ -59,6 +60,32 @@ const FALLBACK_API_KEY = process.env.INSTANTLY_API_KEY || 'j5qdbgdn6hmqsaqfwnvmh
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+const mxLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Rate limit exceeded. Max 100 MX lookups per 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const mxCsvLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Rate limit exceeded. Max 20 CSV uploads per 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const healthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { error: 'Rate limit exceeded.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const MAX_DOMAINS_PER_REQUEST = 500;
 
 // Per-instance cache (used in local mode only)
 let cachedAccounts = [];
@@ -162,7 +189,7 @@ function getRequestCredentials(req) {
   return { provider, apiKey };
 }
 
-app.get('/api/accounts', async (req, res) => {
+app.get('/api/accounts', healthLimiter, async (req, res) => {
   const { provider, apiKey } = getRequestCredentials(req);
   if (!apiKey) return res.status(400).json({ error: 'No API key provided. Set it in Settings or via INSTANTLY_API_KEY env var.' });
 
@@ -263,17 +290,20 @@ async function lookupDomains(domains) {
   return { results, summary, total: results.length };
 }
 
-app.post('/api/mx/lookup', async (req, res) => {
+app.post('/api/mx/lookup', mxLookupLimiter, async (req, res) => {
   const { domains } = req.body;
   if (!domains || !Array.isArray(domains) || domains.length === 0) {
     return res.status(400).json({ error: 'Must provide an array of domains' });
+  }
+  if (domains.length > MAX_DOMAINS_PER_REQUEST) {
+    return res.status(400).json({ error: `Too many domains. Max ${MAX_DOMAINS_PER_REQUEST} per request.` });
   }
 
   const result = await lookupDomains(domains);
   res.json(result);
 });
 
-app.post('/api/mx/lookup-csv', async (req, res) => {
+app.post('/api/mx/lookup-csv', mxCsvLimiter, async (req, res) => {
   const { csvData } = req.body;
   if (!csvData) return res.status(400).json({ error: 'No CSV data provided' });
 
