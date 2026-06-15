@@ -353,6 +353,258 @@ app.get('/api/mx/providers', (req, res) => {
   res.json({ providers: PROVIDERS });
 });
 
+// ─── DNS Auth Checker (SPF, DKIM, DMARC) ───
+
+async function resolveTxtViaDoh(domain) {
+  const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=TXT`);
+  const data = await res.json();
+  if (data.Status !== 0 || !data.Answer) return [];
+  return data.Answer.filter(a => a.type === 16).map(a => a.data.replace(/^"|"$/g, ''));
+}
+
+async function checkDnsAuth(domain) {
+  const spfRecords = await resolveTxtViaDoh(domain);
+  const spf = spfRecords.find(r => r.startsWith('v=spf1')) || null;
+
+  const dmarcRecords = await resolveTxtViaDoh(`_dmarc.${domain}`);
+  const dmarc = dmarcRecords.find(r => r.startsWith('v=DMARC1')) || null;
+
+  let dkim = null;
+  for (const selector of ['default', 'google', 'selector1', 'selector2', 'dkim', 'mail', 'smtp', 'zoho', 'mx']) {
+    const records = await resolveTxtViaDoh(`${selector}._domainkey.${domain}`);
+    const dkimRecord = records.find(r => r.startsWith('v=DKIM1'));
+    if (dkimRecord) { dkim = { selector, record: dkimRecord }; break; }
+  }
+
+  const spfStatus = !spf ? 'missing' : spf.includes('-all') ? 'pass' : spf.includes('~all') ? 'softfail' : 'neutral';
+  const dmarcPolicy = dmarc ? (dmarc.match(/p=(none|quarantine|reject)/) || [])[1] || 'unknown' : 'none';
+  const dmarcStatus = !dmarc ? 'missing' : dmarcPolicy === 'reject' ? 'pass' : dmarcPolicy === 'quarantine' ? 'quarantine' : 'none';
+
+  return {
+    domain,
+    spf: { raw: spf, status: spfStatus },
+    dkim: { found: !!dkim, selector: dkim?.selector || null, raw: dkim?.record || null },
+    dmarc: { raw: dmarc, status: dmarcStatus, policy: dmarcPolicy },
+    score: spfStatus === 'pass' ? 10 : spfStatus === 'softfail' ? 5 : 0,
+  };
+}
+
+app.post('/api/dns/lookup', async (req, res) => {
+  const { domains } = req.body;
+  if (!domains || !Array.isArray(domains) || domains.length === 0)
+    return res.status(400).json({ error: 'Must provide an array of domains' });
+  if (domains.length > 50) return res.status(400).json({ error: 'Max 50 domains per request' });
+
+  const results = await Promise.allSettled(domains.map(d => checkDnsAuth(typeof d === 'string' ? d : d.domain)));
+  const dnsResults = results.map(r => r.status === 'fulfilled' ? r.value : { domain: 'error', error: r.reason?.message });
+  res.json({ results: dnsResults });
+});
+
+// ─── Blacklist (DNSBL) Checker ───
+
+const DNSBLS = [
+  { name: 'Spamhaus', host: 'zen.spamhaus.org' },
+  { name: 'Barracuda', host: 'b.barracudacentral.org' },
+  { name: 'SORBS', host: 'dnsbl.sorbs.net' },
+  { name: 'SpamCop', host: 'bl.spamcop.net' },
+  { name: 'MXToolbox', host: 'dnsbl.mxtoolbox.com' },
+  { name: 'SpamRats', host: 'bl.spamrats.com' },
+];
+
+async function reverseIp(ip) {
+  return ip.split('.').reverse().join('.');
+}
+
+async function checkIpInDnsbl(ip, dnsbl) {
+  const lookup = `${await reverseIp(ip)}.${dnsbl}`;
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(lookup)}&type=A`);
+    const data = await res.json();
+    if (data.Status === 0 && data.Answer) {
+      return data.Answer.some(a => a.type === 1 && a.data.startsWith('127.'));
+    }
+  } catch {}
+  return false;
+}
+
+async function lookupDomainIps(domain) {
+  const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`);
+  const data = await res.json();
+  if (data.Status !== 0 || !data.Answer) return [];
+  return data.Answer.filter(a => a.type === 1).map(a => a.data);
+}
+
+app.post('/api/blacklist/check', async (req, res) => {
+  const { domains } = req.body;
+  if (!domains || !Array.isArray(domains) || domains.length === 0)
+    return res.status(400).json({ error: 'Must provide an array of domains' });
+  if (domains.length > 20) return res.status(400).json({ error: 'Max 20 domains per request' });
+
+  const results = [];
+  for (const item of domains) {
+    const domain = typeof item === 'string' ? item : item.domain;
+    try {
+      const ips = await lookupDomainIps(domain);
+      const checks = [];
+      for (const ip of ips.slice(0, 3)) {
+        for (const bl of DNSBLS) {
+          const listed = await checkIpInDnsbl(ip, bl.host);
+          if (listed) checks.push({ ip, blacklist: bl.name, host: bl.host });
+        }
+      }
+      const listed = checks.length > 0;
+      results.push({ domain, ips, listed, checks, score: listed ? -20 : 0 });
+    } catch (e) {
+      results.push({ domain, ips: [], listed: false, checks: [], score: 0, error: e.message });
+    }
+  }
+  res.json({ results });
+});
+
+// ─── Bulk Scanner (unified pipeline) ───
+
+const SCRAPER_URL = process.env.SCRAPER_URL || 'http://localhost:8766';
+
+function computeDeliverability(mxResult, dnsResult, blResult) {
+  let score = 50;
+  const signals = [];
+
+  if (mxResult) {
+    if (mxResult.risk === 'high') { score -= 25; signals.push('mx_blocked'); }
+    else if (mxResult.risk === 'medium') { score -= 10; signals.push('mx_moderate'); }
+    else if (mxResult.risk === 'low') { score += 10; signals.push('mx_clean'); }
+    else signals.push('mx_unknown');
+    if (mxResult.mxCount === 0) { score -= 15; signals.push('no_mx'); }
+    else if (mxResult.mxCount >= 2) { score += 5; signals.push('mx_redundant'); }
+  }
+
+  if (dnsResult) {
+    if (dnsResult.spf?.status === 'pass') { score += 10; signals.push('spf_ok'); }
+    else if (dnsResult.spf?.status === 'missing') { score -= 10; signals.push('spf_missing'); }
+    else signals.push('spf_weak');
+
+    if (dnsResult.dkim?.found) { score += 5; signals.push('dkim_ok'); }
+    else { score -= 5; signals.push('dkim_missing'); }
+
+    if (dnsResult.dmarc?.policy === 'reject') { score += 5; signals.push('dmarc_strict'); }
+    else if (dnsResult.dmarc?.policy === 'quarantine') { score += 2; signals.push('dmarc_quarantine'); }
+    else if (dnsResult.dmarc?.status === 'missing') { score -= 5; signals.push('dmarc_missing'); }
+  }
+
+  if (blResult) {
+    if (blResult.listed) { score -= 25; signals.push('blacklisted'); }
+    else { score += 5; signals.push('not_blacklisted'); }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const level = score >= 75 ? 'good' : score >= 45 ? 'moderate' : 'poor';
+  return { score, level, signals };
+}
+
+const bulkLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 30,
+  message: { error: 'Rate limit exceeded. Max 30 bulk scans per 15 min.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+app.post('/api/bulk/scan', bulkLimiter, async (req, res) => {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: 'Must provide an array of items' });
+  if (items.length > 100) return res.status(400).json({ error: 'Max 100 items per scan' });
+
+  const results = [];
+  for (const item of items) {
+    const name = typeof item === 'string' ? item : item.name || item.company || item.domain || item.website || '';
+    const inputDomain = typeof item === 'string' ? null : item.domain || item.website || null;
+    if (!name.trim()) continue;
+
+    let domain = inputDomain;
+
+    if (!domain) {
+      try {
+        const scRes = await fetch(`${SCRAPER_URL}/scrape/company`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: name.trim() }),
+        });
+        if (scRes.ok) {
+          const scData = await scRes.json();
+          domain = scData.domain || null;
+        }
+      } catch {}
+    }
+
+    const entry = { name, domain: domain || '', mxRisk: null, dnsAuth: null, blacklist: null, deliverability: null };
+
+    if (domain) {
+      try {
+        const mxRes = await lookupDomains([{ domain, company: name }]);
+        entry.mxRisk = mxRes.results?.[0]?.risk || null;
+        entry.mxDetail = mxRes.results?.[0] || null;
+      } catch {}
+
+      try {
+        const dnsRes = await checkDnsAuth(domain);
+        entry.dnsAuth = dnsRes;
+      } catch {}
+
+      try {
+        const ips = await lookupDomainIps(domain);
+        const checks = [];
+        for (const ip of ips.slice(0, 2)) {
+          for (const bl of DNSBLS) {
+            if (await checkIpInDnsbl(ip, bl.host)) checks.push({ ip, blacklist: bl.name });
+          }
+        }
+        entry.blacklist = { listed: checks.length > 0, checks };
+      } catch {}
+
+      entry.deliverability = computeDeliverability(entry.mxDetail, entry.dnsAuth, entry.blacklist);
+    }
+
+    results.push(entry);
+  }
+
+  res.json({ results, total: results.length });
+});
+
+// ─── Watchlist (local file-based, in-memory for serverless) ───
+
+const WATCHLIST_FILE = path.join(__dirname, '..', 'watchlist.json');
+function loadWatchlist() {
+  try {
+    if (fs.existsSync(WATCHLIST_FILE)) return JSON.parse(fs.readFileSync(WATCHLIST_FILE, 'utf8'));
+  } catch {}
+  return [];
+}
+
+function saveWatchlist(data) {
+  try { fs.writeFileSync(WATCHLIST_FILE, JSON.stringify(data, null, 2)); } catch {}
+}
+
+app.get('/api/watchlist', (req, res) => {
+  const watchlist = loadWatchlist();
+  res.json({ watchlist });
+});
+
+app.post('/api/watchlist', (req, res) => {
+  const { domain, name, notes } = req.body;
+  if (!domain) return res.status(400).json({ error: 'Domain is required' });
+  const watchlist = loadWatchlist();
+  if (!watchlist.find(w => w.domain === domain)) {
+    watchlist.push({ domain, name: name || domain, notes: notes || '', added: Date.now() });
+    saveWatchlist(watchlist);
+  }
+  res.json({ watchlist });
+});
+
+app.delete('/api/watchlist/:domain', (req, res) => {
+  let watchlist = loadWatchlist();
+  watchlist = watchlist.filter(w => w.domain !== req.params.domain);
+  saveWatchlist(watchlist);
+  res.json({ watchlist });
+});
+
 // ─── Serve Frontend (local only) ───
 
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
