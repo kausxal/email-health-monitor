@@ -198,7 +198,7 @@ async function fetchAccounts(provider, apiKey) {
   if (volumeHistory.length > 2880) volumeHistory = volumeHistory.slice(-2880);
   // Persist compact snapshot to file every 5 minutes
   if (volumeHistory.length % 10 === 0) {
-    try { fs.writeFileSync(VOLUME_FILE, JSON.stringify(volumeHistory.slice(-288))); } catch {}
+    try { fs.writeFileSync(VOLUME_FILE, JSON.stringify(volumeHistory.slice(-2880))); } catch {}
   }
 
   return enriched;
@@ -924,53 +924,118 @@ function loadVolumeHistory() {
 }
 loadVolumeHistory();
 
+async function fetchSentVolume(provider, apiKey, startDate, endDate) {
+  if (!apiKey) return null;
+  try {
+    if (provider === 'instantly') {
+      const url = `https://api.instantly.ai/api/v2/campaigns/analytics/daily?start_date=${startDate}&end_date=${endDate}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+      if (res.status === 402 || !res.ok) return null;
+      const data = await res.json();
+      return (Array.isArray(data) ? data : []).map(d => ({
+        date: d.date, sent: d.sent || 0, opened: d.unique_opened || d.opened || 0,
+        replied: d.replies || d.unique_replies || 0, bounced: d.bounced || 0,
+      }));
+    }
+    if (provider === 'smartlead') {
+      const url = `https://server.smartlead.ai/api/v1/analytics/day-wise-overall-stats?api_key=${apiKey}&start_date=${startDate}&end_date=${endDate}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const stats = data?.data?.day_wise_stats || [];
+      return stats.map(d => ({
+        date: d.date, sent: d.sent || 0, opened: d.opened || 0,
+        replied: d.replied || 0, bounced: d.bounced || 0,
+      }));
+    }
+  } catch {}
+  return null;
+}
+
 app.get('/api/volume', async (req, res) => {
   const { provider, apiKey } = getRequestCredentials(req);
+  const { start, end, view } = req.query;
 
-  if (volumeHistory.length === 0 && apiKey) {
-    try {
-      await fetchAccounts(provider, apiKey);
-    } catch {}
+  // Date range provided → fetch actual sent counts from provider API
+  if (start && end) {
+    const dayData = await fetchSentVolume(provider, apiKey, start, end);
+    if (dayData && dayData.length > 0) {
+      for (const d of dayData) {
+        if (!volumeHistory.find(v => v.date === d.date)) {
+          volumeHistory.push({ ...d, timestamp: new Date(d.date).getTime(), totalCapacity: 0, estDailySent: 0, accountCount: 0, activeCount: 0 });
+        }
+      }
+
+      let chartData;
+      if (view === 'monthly') {
+        const m = {};
+        for (const d of dayData) { const k = d.date.slice(0, 7); if (!m[k]) m[k] = { date: k, sent: 0, opened: 0, replied: 0, bounced: 0 }; m[k].sent += d.sent; m[k].opened += d.opened; m[k].replied += d.replied; m[k].bounced += d.bounced; }
+        chartData = Object.values(m).sort((a, b) => a.date.localeCompare(b.date));
+      } else if (view === 'weekly') {
+        const w = {};
+        for (const d of dayData) { const dt = new Date(d.date); const ws = new Date(dt); ws.setDate(dt.getDate() - dt.getDay()); const k = ws.toISOString().slice(0, 10); if (!w[k]) w[k] = { date: k, sent: 0, opened: 0, replied: 0, bounced: 0 }; w[k].sent += d.sent; w[k].opened += d.opened; w[k].replied += d.replied; w[k].bounced += d.bounced; }
+        chartData = Object.values(w).sort((a, b) => a.date.localeCompare(b.date));
+      } else {
+        chartData = dayData.map(d => ({ date: d.date, sent: d.sent, opened: d.opened, replied: d.replied, bounced: d.bounced }));
+      }
+
+      const totals = dayData.reduce((a, d) => ({ sent: a.sent + d.sent, opened: a.opened + d.opened, replied: a.replied + d.replied, bounced: a.bounced + d.bounced }), { sent: 0, opened: 0, replied: 0, bounced: 0 });
+
+      return res.json({ source: 'api', range: { start, end }, chartData, totals,
+        today: { estimatedSent: dayData[dayData.length - 1]?.sent || 0 },
+      });
+    }
   }
 
-  const recent = volumeHistory.slice(-288); // last ~24h at 30s intervals
-  const byDay = {};
-  const byWeek = {};
+  // Fallback: aggregate local history snapshots
+  if (volumeHistory.length === 0 && apiKey) {
+    try { await fetchAccounts(provider, apiKey); } catch {}
+  }
+
+  const recent = volumeHistory.slice(-2880);
+  const byDay = {}, byWeek = {}, byMonth = {};
+
   for (const v of recent) {
-    const day = new Date(v.timestamp).toISOString().slice(0, 10);
-    const week = `${new Date(v.timestamp).getFullYear()}-W${String(Math.ceil(new Date(v.timestamp).getDate() / 7)).padStart(2, '0')}`;
-    if (!byDay[day]) byDay[day] = { day, totalCapacity: 0, estDailySent: 0, count: 0 };
-    byDay[day].totalCapacity += v.totalCapacity;
-    byDay[day].estDailySent += v.estDailySent;
-    byDay[day].count++;
-    if (!byWeek[week]) byWeek[week] = { week, totalCapacity: 0, estDailySent: 0, count: 0 };
-    byWeek[week].totalCapacity += v.totalCapacity;
-    byWeek[week].estDailySent += v.estDailySent;
-    byWeek[week].count++;
+    if (v.date) {
+      const dt = new Date(v.date); const ws = new Date(dt); ws.setDate(dt.getDate() - dt.getDay());
+      const dk = v.date, wk = ws.toISOString().slice(0, 10), mk = v.date.slice(0, 7);
+      if (!byDay[dk]) byDay[dk] = { date: dk, sent: 0, opened: 0, replied: 0, bounced: 0 };
+      byDay[dk].sent += v.sent || 0; byDay[dk].opened += v.opened || 0; byDay[dk].replied += v.replied || 0; byDay[dk].bounced += v.bounced || 0;
+      if (!byWeek[wk]) byWeek[wk] = { date: wk, sent: 0, opened: 0, replied: 0, bounced: 0 };
+      byWeek[wk].sent += v.sent || 0; byWeek[wk].opened += v.opened || 0; byWeek[wk].replied += v.replied || 0; byWeek[wk].bounced += v.bounced || 0;
+      if (!byMonth[mk]) byMonth[mk] = { date: mk, sent: 0, opened: 0, replied: 0, bounced: 0 };
+      byMonth[mk].sent += v.sent || 0; byMonth[mk].opened += v.opened || 0; byMonth[mk].replied += v.replied || 0; byMonth[mk].bounced += v.bounced || 0;
+    } else if (v.timestamp) {
+      const day = new Date(v.timestamp).toISOString().slice(0, 10);
+      const dt = new Date(v.timestamp); const ws = new Date(dt); ws.setDate(dt.getDate() - dt.getDay());
+      const dk = day, wk = ws.toISOString().slice(0, 10), mk = day.slice(0, 7);
+      if (!byDay[dk]) byDay[dk] = { date: dk, totalCapacity: 0, estDailySent: 0, count: 0 };
+      byDay[dk].totalCapacity += v.totalCapacity || 0; byDay[dk].estDailySent += v.estDailySent || 0; byDay[dk].count++;
+      if (!byWeek[wk]) byWeek[wk] = { date: wk, totalCapacity: 0, estDailySent: 0, count: 0 };
+      byWeek[wk].totalCapacity += v.totalCapacity || 0; byWeek[wk].estDailySent += v.estDailySent || 0; byWeek[wk].count++;
+      if (!byMonth[mk]) byMonth[mk] = { date: mk, totalCapacity: 0, estDailySent: 0, count: 0 };
+      byMonth[mk].totalCapacity += v.totalCapacity || 0; byMonth[mk].estDailySent += v.estDailySent || 0; byMonth[mk].count++;
+    }
   }
 
   const latest = recent[recent.length - 1] || { totalCapacity: 0, estDailySent: 0, accountCount: 0, activeCount: 0 };
 
-  // Average daily values
-  const dailyAvg = Object.values(byDay).map(d => ({
-    day: d.day,
-    capacity: Math.round(d.totalCapacity / d.count),
-    sent: Math.round(d.estDailySent / d.count),
-  }));
+  const fmtSnap = (o) => o.count ? { date: o.date, capacity: Math.round(o.totalCapacity / o.count), sent: Math.round(o.estDailySent / o.count) } : null;
+
+  const dailyArr = Object.values(byDay).map(fmtSnap).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+  const weeklyArr = Object.values(byWeek).map(fmtSnap).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+  const monthlyArr = Object.values(byMonth).map(fmtSnap).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+
+  let chartData;
+  if (view === 'monthly') chartData = monthlyArr.slice(-12);
+  else if (view === 'weekly') chartData = weeklyArr.slice(-12);
+  else chartData = dailyArr.slice(-30);
 
   res.json({
-    today: {
-      capacity: latest.totalCapacity,
-      estimatedSent: latest.estDailySent,
-      accountCount: latest.accountCount,
-      activeCount: latest.activeCount,
-    },
-    daily: dailyAvg,
-    weekly: Object.values(byWeek).map(w => ({
-      week: w.week,
-      capacity: Math.round(w.totalCapacity / w.count),
-      sent: Math.round(w.estDailySent / w.count),
-    })),
+    source: 'snapshots',
+    today: { capacity: latest.totalCapacity, estimatedSent: latest.estDailySent, accountCount: latest.accountCount, activeCount: latest.activeCount },
+    daily: dailyArr, weekly: weeklyArr, monthly: monthlyArr,
+    chartData, totals: null,
   });
 });
 
