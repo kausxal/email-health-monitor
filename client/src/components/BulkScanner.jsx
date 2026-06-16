@@ -1,4 +1,4 @@
-import { useState, useRef, Fragment } from 'react'
+import { useState, useRef, Fragment, useEffect } from 'react'
 
 function Badge({ label, color }) {
   const pct = parseInt(label)
@@ -83,6 +83,8 @@ function ExpandedDetail({ r }) {
   )
 }
 
+const STORAGE_KEY = 'bulk_scanner_session'
+
 export default function BulkScanner() {
   const [input, setInput] = useState('')
   const [results, setResults] = useState([])
@@ -90,7 +92,40 @@ export default function BulkScanner() {
   const [error, setError] = useState(null)
   const [status, setStatus] = useState('')
   const [expandedRow, setExpandedRow] = useState(null)
+  const [lastScanAt, setLastScanAt] = useState(null)
   const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        const data = JSON.parse(saved)
+        setResults(data.results || [])
+        setStatus(data.status || '')
+        setInput(data.input || '')
+        setLastScanAt(data.lastScanAt || null)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (results.length > 0 || status) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          results, status, input, lastScanAt,
+        }))
+      }
+    } catch {}
+  }, [results, status, input, lastScanAt])
+
+  const clearSession = () => {
+    localStorage.removeItem(STORAGE_KEY)
+    setResults([])
+    setStatus('')
+    setInput('')
+    setLastScanAt(null)
+    setExpandedRow(null)
+  }
 
   const handleFile = async (file) => {
     if (!file) return
@@ -133,6 +168,8 @@ export default function BulkScanner() {
       const data = await res.json()
       if (data.error) { setError(data.error); return }
       setResults(data.results || [])
+      const ts = new Date().toISOString()
+      setLastScanAt(ts)
       setStatus(`${data.total} SCANNED`)
     } catch (err) {
       setError(err.message)
@@ -173,6 +210,12 @@ export default function BulkScanner() {
   const delOrder = { poor: 0, moderate: 1, good: 2, null: 3 }
   const sortedResults = [...results].sort((a, b) => (delOrder[a.deliverability?.level] || 3) - (delOrder[b.deliverability?.level] || 3))
 
+  const formatTime = (iso) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
   return (
     <div>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mb-6 text-[10px] text-[var(--tx-muted)] tracking-wider">
@@ -197,11 +240,14 @@ export default function BulkScanner() {
       <div className="flex items-center gap-3 mb-6">
         <button onClick={runScan} disabled={loading || !input.trim()} className="chrome-button px-4 py-2 text-xs">◈ SCAN</button>
         {results.length > 0 && <button onClick={exportCSV} className="chrome-button px-4 py-2 text-xs">⬇ EXPORT CSV</button>}
+        {results.length > 0 && <button onClick={clearSession} className="chrome-button px-4 py-2 text-xs" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>✕ CLEAR</button>}
         {loading && <div className="flex items-center gap-2 text-xs text-[var(--tx-muted)]">
           <div className="w-3 h-3 border border-[var(--accent)] animate-spin" style={{ boxShadow: '0 0 6px var(--accent-shadow)' }} />
           {status}
         </div>}
-        {!loading && status && <span className="text-xs text-[var(--tx-muted)] tracking-wider">{status}</span>}
+        {!loading && status && <span className="text-xs text-[var(--tx-muted)] tracking-wider">
+          {status}{lastScanAt && ` · ${formatTime(lastScanAt)}`}
+        </span>}
         {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
       </div>
 
@@ -296,7 +342,7 @@ export default function BulkScanner() {
             </table>
           </div>
           <div className="text-[10px] text-[var(--tx-dim)] px-4 py-2 border-t border-[var(--border)] tracking-wider">
-            click any row for details · CHANNEL column shows recommended outreach method
+            click any row for details · CHANNEL column shows recommended outreach method · results persist across tab switches
           </div>
         </div>
       )}

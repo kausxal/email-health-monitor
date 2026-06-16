@@ -520,6 +520,183 @@ app.post('/api/sender/check', async (req, res) => {
   res.json({ domain, score, level, critical, warnings, issues });
 });
 
+// ─── BIMI Checker ───
+
+app.post('/api/bimi/check', async (req, res) => {
+  const { domain } = req.body;
+  if (!domain) return res.status(400).json({ error: 'Domain is required' });
+  try {
+    const txtRecords = await resolveTxtViaDoh(`default._bimi.${domain}`);
+    const bimi = txtRecords.find(r => r.startsWith('v=BIMI1')) || null;
+    let logoUrl = null;
+    if (bimi) {
+      const urlMatch = bimi.match(/l=([^;\s]+)/);
+      if (urlMatch) logoUrl = urlMatch[1];
+    }
+    res.json({ domain, found: !!bimi, raw: bimi, logoUrl });
+  } catch (e) {
+    res.json({ domain, found: false, raw: null, logoUrl: null, error: e.message });
+  }
+});
+
+// ─── Email Content Analyzer ───
+
+const SPAM_TRIGGERS = [
+  'free', 'guarantee', 'act now', 'limited time', 'click here', 'buy now',
+  'exclusive offer', 'congratulations', 'winner', 'urgent', 'immediately',
+  'amazing', 'incredible', 'once in a lifetime', 'no cost', 'bonus',
+  'earn money', 'work from home', 'double your', 'increase sales',
+  'unlimited', 'trial', 'cash', 'promise', 'discount', 'cheap', 'deal',
+  'eliminate debt', 'extra income', 'financial freedom', 'investment',
+  'lowest price', 'million dollars', 'risk-free', 'satisfaction guaranteed',
+  'stop snoring', 'weight loss', 'viagra', 'refinance', 'credit',
+  'obligation', 'opt in', 'pre-approved', 'privacy policy', 'removal',
+  'reserves the right', 'no catch', 'no hidden', 'no obligation',
+  'not spam', 'per day', 'save big', 'social security', 'this is not spam',
+];
+
+app.post('/api/content/analyze', async (req, res) => {
+  const { subject, body, fromName, fromEmail } = req.body;
+  if (!body) return res.status(400).json({ error: 'Email body is required' });
+
+  const issues = [];
+  const fullText = `${subject || ''} ${body}`.toLowerCase();
+  const wordCount = body.split(/\s+/).length;
+
+  // 1. Trigger word scan
+  const foundTriggers = SPAM_TRIGGERS.filter(t => fullText.includes(t.toLowerCase()));
+  if (foundTriggers.length > 3) {
+    issues.push({ severity: 'high', label: `${foundTriggers.length} spam trigger words found`, detail: foundTriggers.slice(0, 10).join(', '), fix: 'Remove or reduce trigger words. Focus on personalization and value proposition.' });
+  } else if (foundTriggers.length > 0) {
+    issues.push({ severity: 'low', label: `${foundTriggers.length} minor trigger word(s)`, detail: foundTriggers.join(', '), fix: 'Consider rephrasing to avoid spam filter keywords.' });
+  }
+
+  // 2. Subject line
+  if (subject) {
+    const subLen = subject.length;
+    if (subLen < 20) issues.push({ severity: 'low', label: `Subject too short (${subLen} chars)`, fix: 'Aim for 50-70 character subject lines for optimal delivery.' });
+    else if (subLen > 90) issues.push({ severity: 'medium', label: `Subject too long (${subLen} chars)`, fix: 'Keep subject lines under 90 characters to avoid truncation on mobile.' });
+    if (subject === subject.toUpperCase() && subject.length > 5) issues.push({ severity: 'medium', label: 'Subject is ALL CAPS', fix: 'Use sentence case — ALL CAPS triggers spam filters.' });
+    if (subject.includes('!')) issues.push({ severity: 'medium', label: `Subject contains ${(subject.match(/!/g) || []).length} exclamation mark(s)`, fix: 'Remove exclamation marks from subject lines.' });
+    if (subject.toLowerCase().includes('re:')) issues.push({ severity: 'medium', label: 'Subject contains RE: (looks like reply)', fix: 'Remove RE: prefix from cold emails — looks deceptive.' });
+  } else {
+    issues.push({ severity: 'high', label: 'No subject line', fix: 'Always include a subject line.' });
+  }
+
+  // 3. Body structure
+  const linkCount = (body.match(/https?:\/\/[^\s<>"']+/g) || []).length;
+  const imgCount = (body.match(/<img[^>]+>/gi) || []).length;
+  const exclaimCount = (body.match(/!/g) || []).length;
+  const capsWords = body.split(/\s+/).filter(w => w.length > 2 && w === w.toUpperCase()).length;
+
+  if (linkCount > 5) issues.push({ severity: 'high', label: `${linkCount} links in email`, detail: 'Too many links triggers spam filters', fix: 'Limit to 1-2 relevant links per cold email.' });
+  if (imgCount > 3) issues.push({ severity: 'medium', label: `${imgCount} images in email`, fix: 'Cold emails with mostly images look like marketing. Use mostly text with at most 1 image.' });
+  if (exclaimCount > 5) issues.push({ severity: 'medium', label: `${exclaimCount} exclamation marks found`, fix: 'Reduce exclamation marks — they add an aggressive tone and trigger spam filters.' });
+  if (capsWords > 5) issues.push({ severity: 'medium', label: `${capsWords} ALL CAPS words found`, fix: 'Avoid using ALL CAPS for emphasis. Use bold or italics instead.' });
+
+  // 4. Text length
+  if (wordCount < 20 && !subject) issues.push({ severity: 'medium', label: `Very short email (${wordCount} words)`, fix: 'Cold emails should be 50-125 words for optimal engagement.' });
+  else if (wordCount < 20) issues.push({ severity: 'low', label: `Short email (${wordCount} words)`, fix: 'Consider expanding to 50-125 words for context.' });
+  if (wordCount > 500) issues.push({ severity: 'low', label: `Very long email (${wordCount} words)`, fix: 'Keep cold emails under 200 words — long emails get skimmed or ignored.' });
+
+  // 5. Personalization check
+  const hasNameToken = fullText.includes('{{') || fullText.includes('{first') || fullText.includes('{name');
+  if (!hasNameToken) issues.push({ severity: 'low', label: 'No personalization detected', fix: 'Add personalization tokens like {{first_name}} to improve engagement and deliverability.' });
+
+  // 6. From name check
+  if (fromName && fromName === fromName.toUpperCase() && fromName.length > 3) {
+    issues.push({ severity: 'low', label: 'From name is ALL CAPS', fix: 'Use normal capitalization for sender name — ALL CAPS looks like spam.' });
+  }
+
+  // 7. Text vs HTML ratio
+  const htmlTagCount = (body.match(/<[^>]+>/g) || []).length;
+  if (htmlTagCount > 100) issues.push({ severity: 'medium', label: 'HTML-heavy email', fix: 'Cold emails should be plain text or light HTML. High HTML ratio triggers spam filters.' });
+
+  // Score
+  const severityScores = { high: -20, medium: -10, low: -5 };
+  let score = 100;
+  for (const issue of issues) score += severityScores[issue.severity] || 0;
+  score = Math.max(0, Math.min(100, score));
+
+  const level = score >= 80 ? 'good' : score >= 50 ? 'moderate' : 'poor';
+
+  res.json({
+    score, level,
+    stats: { wordCount, linkCount, imgCount, exclaimCount, capsWords, triggerWords: foundTriggers.length, htmlTags: htmlTagCount },
+    issues,
+    fromName, fromEmail,
+  });
+});
+
+// ─── DMARC Report Parser (XML upload) ───
+
+const { XMLParser } = (() => {
+  try { return require('fast-xml-parser'); } catch { return { XMLParser: null }; }
+})();
+
+app.post('/api/dmarc/parse', async (req, res) => {
+  if (!XMLParser) return res.status(500).json({ error: 'fast-xml-parser not installed. Run: npm install fast-xml-parser' });
+
+  const { xml } = req.body;
+  if (!xml) return res.status(400).json({ error: 'DMARC XML report content is required' });
+
+  try {
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    const parsed = parser.parse(xml);
+    const feedback = parsed.feedback || {};
+
+    const metadata = feedback.report_metadata || {};
+    const policy = feedback.policy_published || {};
+    const records = feedback.record || [];
+
+    const recordList = Array.isArray(records) ? records : [records];
+
+    const results = recordList.map(r => {
+      const row = r.row || {};
+      const idents = r.identifiers || {};
+      const evalPol = row.policy_evaluated || {};
+      return {
+        sourceIp: row.source_ip || 'unknown',
+        count: parseInt(row.count || 0, 10),
+        disposition: evalPol.disposition || 'none',
+        dkim: evalPol.dkim || 'fail',
+        spf: evalPol.spf || 'fail',
+        headerFrom: idents.header_from || 'unknown',
+        envelopeFrom: idents.envelope_from || 'unknown',
+      };
+    });
+
+    const totalCount = results.reduce((s, r) => s + r.count, 0);
+    const passCount = results.filter(r => r.dkim === 'pass' && r.spf === 'pass').reduce((s, r) => s + r.count, 0);
+    const failCount = totalCount - passCount;
+
+    const bySource = {};
+    for (const r of results) {
+      if (!bySource[r.sourceIp]) bySource[r.sourceIp] = { ip: r.sourceIp, total: 0, pass: 0, fail: 0, headerFrom: r.headerFrom };
+      bySource[r.sourceIp].total += r.count;
+      if (r.dkim === 'pass' && r.spf === 'pass') bySource[r.sourceIp].pass += r.count;
+      else bySource[r.sourceIp].fail += r.count;
+    }
+
+    res.json({
+      domain: policy.domain || 'unknown',
+      policy: policy.p || 'none',
+      orgName: metadata.org_name || 'unknown',
+      orgEmail: metadata.email || 'unknown',
+      reportId: metadata['@_report_id'] || null,
+      dateRange: metadata.date_range || null,
+      totalCount,
+      passCount,
+      failCount,
+      passRate: totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0,
+      bySource: Object.values(bySource),
+      records: results,
+    });
+  } catch (e) {
+    res.status(400).json({ error: `Failed to parse DMARC XML: ${e.message}` });
+  }
+});
+
 // ─── Blacklist (DNSBL) Checker ───
 
 const DNSBLS = [
@@ -810,6 +987,66 @@ if (fs.existsSync(clientDist)) {
 }
 
 // ─── Health Monitor Background Polling (local only) ───
+// ─── Apollo People Lookup ───
+
+app.post('/api/apollo/lookup', async (req, res) => {
+  const { email, linkedinUrl, apiKey } = req.body;
+  if (!apiKey) return res.status(400).json({ error: 'Apollo API key is required' });
+  if (!email && !linkedinUrl) return res.status(400).json({ error: 'Email or LinkedIn URL is required' });
+
+  const body = {};
+  if (email) body.email = email;
+  if (linkedinUrl) body.linkedin_url = linkedinUrl;
+
+  try {
+    const apolloRes = await fetch('https://api.apollo.io/api/v1/people/match', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (apolloRes.status === 401 || apolloRes.status === 403) {
+      return res.status(400).json({ error: 'Invalid Apollo API key' });
+    }
+
+    const data = await apolloRes.json();
+    if (!data.person) {
+      return res.status(404).json({ error: 'Person not found' });
+    }
+
+    const p = data.person;
+    res.json({
+      id: p.id,
+      name: p.name,
+      firstName: p.first_name,
+      lastName: p.last_name,
+      headline: p.headline,
+      title: p.title,
+      email: p.email,
+      emails: [
+        { address: p.email, type: 'primary', status: p.email_status },
+        ...(p.secondary_emails || []).map(e => ({ address: e, type: 'secondary' })),
+      ].filter(e => e.address),
+      phone: p.phone_numbers?.[0]?.sanitized_number || p.phone || null,
+      city: p.city,
+      state: p.state,
+      country: p.country,
+      organization: p.organization?.name || null,
+      orgWebsite: p.organization?.website_url || null,
+      linkedinUrl: p.linkedin_url,
+      facebookUrl: p.facebook_url,
+      twitterUrl: p.twitter_url,
+      photoUrl: p.photo_url,
+      sanitizedPhone: p.sanitized_phone || null,
+    });
+  } catch (e) {
+    res.status(500).json({ error: `Apollo lookup failed: ${e.message}` });
+  }
+});
+
 let monitorInterval = null;
 
 const startMonitor = () => {

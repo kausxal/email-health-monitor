@@ -8,6 +8,7 @@ const PROVIDERS = [
 export default function Settings({ settings, onSave }) {
   const [provider, setProvider] = useState(settings.provider || 'instantly')
   const [apiKey, setApiKey] = useState(settings.apiKey || '')
+  const [apolloApiKey, setApolloApiKey] = useState(settings.apolloApiKey || '')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [saved, setSaved] = useState(false)
@@ -15,10 +16,11 @@ export default function Settings({ settings, onSave }) {
   useEffect(() => {
     setProvider(settings.provider || 'instantly')
     setApiKey(settings.apiKey || '')
+    setApolloApiKey(settings.apolloApiKey || '')
   }, [settings])
 
   const handleSave = () => {
-    onSave({ provider, apiKey })
+    onSave({ provider, apiKey, apolloApiKey })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -102,6 +104,34 @@ export default function Settings({ settings, onSave }) {
               {testResult.ok ? '◆ ' : '◇ '}{testResult.message}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Apollo config */}
+      <div className="chrome-surface p-4 md:p-6 mt-6">
+        <h2 className="text-sm tracking-[0.12em] text-[var(--tx-primary)] mb-2" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>APOLLO CONFIG</h2>
+        <p className="text-[10px] text-[var(--tx-muted)] mb-6 tracking-wider">look up prospects by email or LinkedIn URL</p>
+
+        <div className="space-y-5">
+          <div>
+            <label className="block text-[10px] text-[var(--tx-muted)] mb-1.5 tracking-wider uppercase">Apollo API Key</label>
+            <input
+              type="password"
+              value={apolloApiKey}
+              onChange={e => setApolloApiKey(e.target.value)}
+              placeholder="ENTER APOLLO API KEY..."
+              className="chrome-input w-full px-4 py-2.5 text-xs uppercase tracking-wider"
+            />
+          </div>
+
+          <div className="pt-2">
+            <button
+              onClick={handleSave}
+              className="chrome-button px-5 py-2.5 text-xs"
+            >
+              SAVE
+            </button>
+          </div>
         </div>
       </div>
     </div>

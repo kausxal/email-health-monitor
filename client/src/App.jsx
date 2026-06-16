@@ -6,6 +6,8 @@ import ChartPanel from './components/ChartPanel'
 import HealthGauge from './components/HealthGauge'
 import BulkScanner from './components/BulkScanner'
 import VolumePanel from './components/VolumePanel'
+import ContentAnalyzer from './components/ContentAnalyzer'
+import ApolloLookup from './components/ApolloLookup'
 import SenderDiagnostics from './components/SenderDiagnostics'
 import Watchlist from './components/Watchlist'
 import Settings from './components/Settings'
@@ -16,8 +18,8 @@ const THEME_KEY = 'email_monitor_theme'
 function loadSettings() {
   try {
     const raw = localStorage.getItem(LS_KEY)
-    return raw ? JSON.parse(raw) : { provider: 'instantly', apiKey: '' }
-  } catch { return { provider: 'instantly', apiKey: '' } }
+    return raw ? JSON.parse(raw) : { provider: 'instantly', apiKey: '', apolloApiKey: '' }
+  } catch { return { provider: 'instantly', apiKey: '', apolloApiKey: '' } }
 }
 
 function loadTheme() {
@@ -164,6 +166,8 @@ export default function App() {
           <Tab active={tab === 'health'} label="Health" icon="◆" onClick={() => setTab('health')} />
           <Tab active={tab === 'scanner'} label="Scanner" icon="◎" onClick={() => setTab('scanner')} />
           <Tab active={tab === 'status'} label="Status" icon="◈" onClick={() => setTab('status')} />
+          <Tab active={tab === 'content'} label="Content" icon="▣" onClick={() => setTab('content')} />
+          <Tab active={tab === 'apollo'} label="Apollo" icon="@" onClick={() => setTab('apollo')} />
           <Tab active={tab === 'watch'} label="Watch" icon="✦" onClick={() => setTab('watch')} />
           <Tab active={tab === 'settings'} label="Config" icon="◇" onClick={() => setTab('settings')} />
         </div>
@@ -227,6 +231,10 @@ export default function App() {
           <BulkScanner />
         ) : tab === 'status' ? (
           <SenderDiagnostics />
+        ) : tab === 'content' ? (
+          <ContentAnalyzer />
+        ) : tab === 'apollo' ? (
+          <ApolloLookup apolloApiKey={settings.apolloApiKey} />
         ) : tab === 'watch' ? (
           <Watchlist />
         ) : (
